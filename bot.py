@@ -2,10 +2,15 @@ import json
 import logging
 import os
 import time
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.helpers import escape_markdown
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from dotenv import load_dotenv
+from flask import Flask, request
+
+# Flask для вебхуков
+flask_app = Flask(__name__)
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -14,7 +19,7 @@ if not TOKEN:
     raise ValueError("TELEGRAM_TOKEN не задан в переменной окружения или .env файле!")
 
 # Настройка логирования
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", filename="bot.log")
 logger = logging.getLogger(__name__)
 
 # Константы
@@ -22,6 +27,7 @@ ADMIN_ID = 335236137
 QUESTIONS_FILE = "questions.json"
 BLACKLIST_FILE = "blacklist.json"
 QA_WEBSITE = "https://mortisplay.ru/qa.html"
+WEBHOOK_URL = f"https://mortisplayqabot.onrender.com{TOKEN}"  # Замени на твой Render URL
 
 # Перевод статусов на русский
 STATUS_TRANSLATIONS = {
@@ -43,6 +49,9 @@ if not os.path.exists(BLACKLIST_FILE):
 # Защита от спама и дублирования
 spam_protection = {}  # {user_id: {"last_ask_time": timestamp, "last_question": text}}
 processed_updates = set()
+
+# Глобальная переменная для Application
+app = None
 
 # Функция для проверки вопроса на запрещённые слова
 def check_blacklist(question: str) -> bool:
@@ -730,7 +739,7 @@ async def notify_admin_on_start(app: Application):
     try:
         await app.bot.send_message(
             chat_id=ADMIN_ID,
-            text="**Бот запустился!** 😎 *Кот одобряет* 🐾",
+            text="**Бот запустился на Render!** 😎 *Кот одобряет* 🐾",
             parse_mode="Markdown"
         )
         logger.info("Уведомление админу о старте отправлено")
@@ -748,7 +757,28 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Не удалось уведомить админа об ошибке: {e}")
 
+# Вебхук-обработчик
+@flask_app.route(f"/{TOKEN}", methods=["POST"])
+async def webhook():
+    global app
+    if not app:
+        logger.error("Application не инициализирован")
+        return "Application not initialized", 500
+    update = Update.de_json(request.get_json(force=True), app.bot)
+    if update:
+        await app.process_update(update)
+    return "OK", 200
+
+async def set_webhook():
+    global app
+    try:
+        await app.bot.set_webhook(WEBHOOK_URL)
+        logger.info(f"Webhook установлен на {WEBHOOK_URL}")
+    except Exception as e:
+        logger.error(f"Ошибка установки webhook: {e}")
+
 def main():
+    global app
     logger.info(f"Бот стартовал с Python {os.sys.version}")
     try:
         app = Application.builder().token(TOKEN).build()
@@ -773,7 +803,11 @@ def main():
     app.add_handler(MessageHandler(filters.StatusUpdate.ALL, lambda u, c: None))
     app.add_error_handler(error_handler)
     app.job_queue.run_once(notify_admin_on_start, 1)
-    app.run_polling(drop_pending_updates=True, allowed_updates=["message", "callback_query"])
+    
+    # Запуск вебхука
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(set_webhook())
+    flask_app.run(host="0.0.0.0", port=10000)
 
 if __name__ == "__main__":
     main()
