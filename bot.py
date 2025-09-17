@@ -3,11 +3,15 @@ import logging
 import os
 import time
 import asyncio
+try:
+    from flask import Flask, request
+except ImportError as e:
+    logging.error(f"Ошибка импорта Flask: {e}")
+    raise ImportError("Flask не установлен. Убедись, что 'flask==2.3.2' есть в requirements.txt и установлен.")
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.helpers import escape_markdown
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from dotenv import load_dotenv
-from flask import Flask, request
 
 # Flask для вебхуков
 flask_app = Flask(__name__)
@@ -781,6 +785,7 @@ def main():
     global app
     logger.info(f"Бот стартовал с Python {os.sys.version}")
     try:
+        # Инициализация без прямого использования Updater
         app = Application.builder().token(TOKEN).build()
     except Exception as e:
         logger.error(f"Ошибка инициализации бота: {e}")
