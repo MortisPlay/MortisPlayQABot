@@ -3,7 +3,6 @@ import logging
 import os
 import time
 import asyncio
-import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.helpers import escape_markdown
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
@@ -28,7 +27,7 @@ ADMIN_ID = 335236137
 QUESTIONS_FILE = "questions.json"
 BLACKLIST_FILE = "blacklist.json"
 QA_WEBSITE = "https://mortisplay.ru/qa.html"
-WEBHOOK_URL = f"https://mortisplayqabot.onrender.com/{TOKEN}"  # Замени на твой Render URL
+WEBHOOK_URL = f"https://mortisplayqabot.onrender.com{TOKEN}"  # Для логов, но не используется в коде
 
 # Перевод статусов на русский
 STATUS_TRANSLATIONS = {
@@ -736,17 +735,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             response += f"ID: `{q['id']}`, Вопрос: *{q['question']}*, Статус: `{status}`{answer}\n"
         await query.message.reply_text(response, parse_mode="Markdown")
 
-async def notify_admin_on_start(app: Application):
-    try:
-        await app.bot.send_message(
-            chat_id=ADMIN_ID,
-            text="**Бот запустился на Render!** 😎 *Кот одобряет* 🐾",
-            parse_mode="Markdown"
-        )
-        logger.info("Уведомление админу о старте отправлено")
-    except Exception as e:
-        logger.error(f"Ошибка уведомления админа при старте: {e}")
-
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Ошибка: {context.error}")
     try:
@@ -770,31 +758,11 @@ async def webhook():
         await app.process_update(update)
     return "OK", 200
 
-async def set_webhook():
-    global app
-    try:
-        # Прямой API-запрос для установки вебхука
-        response = requests.get(f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={WEBHOOK_URL}")
-        result = response.json()
-        if result.get("ok"):
-            logger.info(f"Webhook установлен на {WEBHOOK_URL}")
-        else:
-            logger.error(f"Ошибка API setWebhook: {result}")
-            raise Exception(f"Ошибка API: {result.get('description', 'Неизвестная ошибка')}")
-    except Exception as e:
-        logger.error(f"Ошибка установки webhook: {e}")
-        # Fallback на встроенный метод
-        try:
-            await app.bot.set_webhook(WEBHOOK_URL)
-            logger.info(f"Webhook установлен через встроенный метод на {WEBHOOK_URL}")
-        except Exception as e:
-            logger.error(f"Ошибка встроенного set_webhook: {e}")
-
 def main():
     global app
     logger.info(f"Бот стартовал с Python {os.sys.version}")
     try:
-        app = Application.builder().token(TOKEN).updater(None).build()  # Отключаем Updater для фикса ошибки
+        app = Application.builder().token(TOKEN).updater(None).build()  # Отключаем Updater
     except Exception as e:
         logger.error(f"Ошибка инициализации бота: {e}")
         if "InvalidToken" in str(e) or "401" in str(e):
@@ -815,11 +783,8 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.StatusUpdate.ALL, lambda u, c: None))
     app.add_error_handler(error_handler)
-    app.job_queue.run_once(notify_admin_on_start, 1)
     
-    # Запуск вебхука
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(set_webhook())
+    # Запуск Flask для вебхуков
     flask_app.run(host="0.0.0.0", port=10000)
 
 if __name__ == "__main__":
