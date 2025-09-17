@@ -1,0 +1,28 @@
+{
+  "blacklist": [
+    "хуй",
+    "похер",
+    "ебать",
+    "ебаный",
+    "блять",
+    "сука",
+    "пидор",
+    "мудак",
+    "чмо",
+    "долбоёб",
+    "идиот",
+    "дебил",
+    "fuck",
+    "shit",
+    "damn",
+    "bitch",
+    "asshole",
+    "bastard",
+    "faggot",
+    "dick",
+    "cunt",
+    "bot_token",
+    "api_token",
+    "telegram_token"
+  ]
+}
