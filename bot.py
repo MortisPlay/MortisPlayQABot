@@ -27,9 +27,9 @@ ADMIN_ID = 335236137
 QUESTIONS_FILE = "questions.json"
 BLACKLIST_FILE = "blacklist.json"
 QA_WEBSITE = "https://mortisplay.ru/qa.html"
-WEBHOOK_URL = f"https://mortisplayqabot.onrender.com{TOKEN}"  # Для логов, но не используется в коде
+WEBHOOK_URL = f"https://mortisplayqabot.onrender.com/{TOKEN}"  # Для логов
 
-# Перевод статусов на русский
+# Перевод статусов
 STATUS_TRANSLATIONS = {
     "pending": "Рассматривается",
     "approved": "Принят",
@@ -41,19 +41,17 @@ if not os.path.exists(QUESTIONS_FILE):
     with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
         json.dump({"questions": []}, f, ensure_ascii=False, indent=2)
 
-# Инициализация чёрного списка
 if not os.path.exists(BLACKLIST_FILE):
     with open(BLACKLIST_FILE, "w", encoding="utf-8") as f:
         json.dump({"blacklist": []}, f, ensure_ascii=False, indent=2)
 
-# Защита от спама и дублирования
-spam_protection = {}  # {user_id: {"last_ask_time": timestamp, "last_question": text}}
+# Защита от спама
+spam_protection = {}
 processed_updates = set()
 
 # Глобальная переменная для Application
 app = None
 
-# Функция для проверки вопроса на запрещённые слова
 def check_blacklist(question: str) -> bool:
     try:
         with open(BLACKLIST_FILE, "r", encoding="utf-8") as f:
@@ -228,7 +226,6 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Недопустимая длина вопроса от user_id {user_id}: {len(question)} символов")
         return
 
-    # Проверка на запрещённые слова
     if check_blacklist(question):
         await update.message.reply_text(
             "Йоу, твой вопрос содержит *запрещённые слова*! 😿 Попробуй другой.",
@@ -274,7 +271,6 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
-    # Экранирование вопроса для уведомления админа
     escaped_question = escape_markdown(question, version=2)
     escaped_username = escape_markdown(user.username or "Аноним", version=2)
     try:
@@ -291,7 +287,6 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text=f"*Новый вопрос* (ID: {question_id})\nОт: @{user.username or 'Аноним'}\nВопрос: {question}\n`/approve {question_id} <ответ>` — принять\n`/reject {question_id}` — отклонить",
             parse_mode=None
         )
-        logger.info(f"Отправлено уведомление админу без Markdown: вопрос ID {question_id}")
 
 async def notify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -746,23 +741,32 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Не удалось уведомить админа об ошибке: {e}")
 
-# Вебхук-обработчик
 @flask_app.route(f"/{TOKEN}", methods=["POST"])
 async def webhook():
     global app
+    logger.info("Получен запрос на вебхук")
     if not app:
         logger.error("Application не инициализирован")
         return "Application not initialized", 500
-    update = Update.de_json(request.get_json(force=True), app.bot)
-    if update:
-        await app.process_update(update)
-    return "OK", 200
+    try:
+        update = Update.de_json(request.get_json(force=True), app.bot)
+        logger.info(f"Получено обновление: {update}")
+        if update:
+            await app.process_update(update)
+            logger.info(f"Обновление {update.update_id} обработано")
+        else:
+            logger.warning("Получено пустое обновление")
+        return "OK", 200
+    except Exception as e:
+        logger.error(f"Ошибка в вебхуке: {e}")
+        return "Error processing webhook", 500
 
 def main():
     global app
     logger.info(f"Бот стартовал с Python {os.sys.version}")
     try:
-        app = Application.builder().token(TOKEN).updater(None).build()  # Отключаем Updater
+        app = Application.builder().token(TOKEN).updater(None).build()
+        logger.info("Application успешно инициализирован")
     except Exception as e:
         logger.error(f"Ошибка инициализации бота: {e}")
         if "InvalidToken" in str(e) or "401" in str(e):
@@ -784,7 +788,6 @@ def main():
     app.add_handler(MessageHandler(filters.StatusUpdate.ALL, lambda u, c: None))
     app.add_error_handler(error_handler)
     
-    # Запуск Flask для вебхуков
     flask_app.run(host="0.0.0.0", port=10000)
 
 if __name__ == "__main__":
