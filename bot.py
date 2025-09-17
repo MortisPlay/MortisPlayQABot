@@ -3,15 +3,12 @@ import logging
 import os
 import time
 import asyncio
-try:
-    from flask import Flask, request
-except ImportError as e:
-    logging.error(f"Ошибка импорта Flask: {e}")
-    raise ImportError("Flask не установлен. Убедись, что 'flask==2.3.2' есть в requirements.txt и установлен.")
+import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.helpers import escape_markdown
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from dotenv import load_dotenv
+from flask import Flask, request
 
 # Flask для вебхуков
 flask_app = Flask(__name__)
@@ -31,7 +28,7 @@ ADMIN_ID = 335236137
 QUESTIONS_FILE = "questions.json"
 BLACKLIST_FILE = "blacklist.json"
 QA_WEBSITE = "https://mortisplay.ru/qa.html"
-WEBHOOK_URL = f"https://mortisplayqabot.onrender.com{TOKEN}"  # Замени на твой Render URL
+WEBHOOK_URL = f"https://mortisplayqabot.onrender.com/{TOKEN}"  # Замени на твой Render URL
 
 # Перевод статусов на русский
 STATUS_TRANSLATIONS = {
@@ -776,17 +773,28 @@ async def webhook():
 async def set_webhook():
     global app
     try:
-        await app.bot.set_webhook(WEBHOOK_URL)
-        logger.info(f"Webhook установлен на {WEBHOOK_URL}")
+        # Прямой API-запрос для установки вебхука
+        response = requests.get(f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={WEBHOOK_URL}")
+        result = response.json()
+        if result.get("ok"):
+            logger.info(f"Webhook установлен на {WEBHOOK_URL}")
+        else:
+            logger.error(f"Ошибка API setWebhook: {result}")
+            raise Exception(f"Ошибка API: {result.get('description', 'Неизвестная ошибка')}")
     except Exception as e:
         logger.error(f"Ошибка установки webhook: {e}")
+        # Fallback на встроенный метод
+        try:
+            await app.bot.set_webhook(WEBHOOK_URL)
+            logger.info(f"Webhook установлен через встроенный метод на {WEBHOOK_URL}")
+        except Exception as e:
+            logger.error(f"Ошибка встроенного set_webhook: {e}")
 
 def main():
     global app
     logger.info(f"Бот стартовал с Python {os.sys.version}")
     try:
-        # Инициализация без прямого использования Updater
-        app = Application.builder().token(TOKEN).build()
+        app = Application.builder().token(TOKEN).updater(None).build()  # Отключаем Updater для фикса ошибки
     except Exception as e:
         logger.error(f"Ошибка инициализации бота: {e}")
         if "InvalidToken" in str(e) or "401" in str(e):
