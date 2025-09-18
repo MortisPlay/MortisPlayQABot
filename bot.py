@@ -34,7 +34,7 @@ ADMIN_ID = 335236137
 QUESTIONS_FILE = "questions.json"
 BLACKLIST_FILE = "blacklist.json"
 QA_WEBSITE = "https://mortisplay.ru/qa.html"
-WEBHOOK_URL = f"https://mortisplayqabot.up.railway.app/{TOKEN}"
+WEBHOOK_URL = "https://mortisplayqabot.up.railway.app/webhook"
 
 # Перевод статусов
 STATUS_TRANSLATIONS = {
@@ -777,10 +777,10 @@ async def health_check():
     logger.info("Получен запрос на /")
     return "Bot is running!", 200
 
-@flask_app.route(f"/webhook/{TOKEN}", methods=["POST", "GET"])  # Изменён маршрут
+@flask_app.route("/webhook", methods=["POST", "GET"])
 async def webhook():
     global app
-    logger.info(f"Получен запрос на вебхук: метод={request.method}, url={request.url}")
+    logger.info(f"Получен запрос на вебхук: метод={request.method}, url={request.url}, headers={request.headers}")
     if not app:
         logger.error("Application не инициализирован")
         return "Application not initialized", 500
@@ -790,6 +790,9 @@ async def webhook():
     try:
         json_data = request.get_json(force=True)
         logger.info(f"Получены данные вебхука: {json_data}")
+        if json_data.get("secret_token") != TOKEN:
+            logger.error(f"Неверный токен в вебхуке: {json_data.get('secret_token')}")
+            return "Invalid token", 403
         update = Update.de_json(json_data, app.bot)
         if not update:
             logger.warning("Получено пустое обновление")
