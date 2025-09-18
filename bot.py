@@ -8,6 +8,7 @@ from telegram.helpers import escape_markdown
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from dotenv import load_dotenv
 from flask import Flask, request
+import threading
 
 # Flask для вебхуков
 flask_app = Flask(__name__)
@@ -808,7 +809,7 @@ async def main_async():
     logger.info(f"Используемый токен: {TOKEN[:10]}...{TOKEN[-10:]}")
     try:
         app = Application.builder().token(TOKEN).updater(None).build()
-        await app.initialize()  # Добавляем инициализацию
+        await app.initialize()  # Инициализация Application
         logger.info("Application успешно инициализирован")
     except Exception as e:
         logger.error(f"Ошибка инициализации бота: {e}")
@@ -829,14 +830,17 @@ async def main_async():
     app.add_handler(CallbackQueryHandler(button_callback, pattern="^(ask|myquestions)$"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.StatusUpdate.ALL, lambda u, c: None))
-    app.add_error_handler(error_handler)
+    app.add_handler(error_handler)
     
     # Уведомление админа при старте
     await notify_admin_on_start(app)
     
     port = int(os.getenv("PORT", 8080))
     logger.info(f"Запускаем Flask на порту {port}")
-    flask_app.run(host="0.0.0.0", port=port)
+    # Запускаем Flask в отдельном потоке
+    def run_flask():
+        flask_app.run(host="0.0.0.0", port=port)
+    threading.Thread(target=run_flask, daemon=True).start()
 
 if __name__ == "__main__":
-    main_async()
+    asyncio.run(main_async())
