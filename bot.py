@@ -7,18 +7,6 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.helpers import escape_markdown
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from dotenv import load_dotenv
-from flask import Flask, request
-from hypercorn.config import Config
-from hypercorn.asyncio import serve
-
-# Flask для вебхуков
-flask_app = Flask(__name__)
-
-# Загрузка переменных окружения
-load_dotenv()
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-if not TOKEN:
-    raise ValueError("TELEGRAM_TOKEN не задан в переменной окружения или .env файле!")
 
 # Настройка логирования (stdout + файл)
 logging.basicConfig(
@@ -31,12 +19,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Загрузка переменных окружения
+load_dotenv()
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+if not TOKEN:
+    raise ValueError("TELEGRAM_TOKEN не задан в переменной окружения или .env файле!")
+
 # Константы
 ADMIN_ID = 335236137
 QUESTIONS_FILE = "questions.json"
 BLACKLIST_FILE = "blacklist.json"
 QA_WEBSITE = "https://mortisplay.ru/qa.html"
-WEBHOOK_URL = "https://mortisplayqabot-production.up.railway.app/webhook"
 
 # Перевод статусов
 STATUS_TRANSLATIONS = {
@@ -57,9 +50,6 @@ if not os.path.exists(BLACKLIST_FILE):
 # Защита от спама
 spam_protection = {}
 processed_updates = set()
-
-# Глобальная переменная для Application
-app = None
 
 def check_blacklist(question: str) -> bool:
     try:
@@ -677,7 +667,6 @@ async def edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except IOError as e:
                     logger.error(f"Ошибка записи в {QUESTIONS_FILE}: {e}")
                     await update.message.reply_text("Ошибка редактирования вопроса! 😿 Свяжитесь с разработчиком.", parse_mode="Markdown")
-                    return
                 await update.message.reply_text(
                     f"Вопрос `{question_id}` *отредактирован*! 😺\nСтарый: *{old_question}*\nНовый: *{new_question}*",
                     parse_mode="Markdown"
@@ -774,49 +763,12 @@ async def notify_admin_on_start(app: Application):
     except Exception as e:
         logger.error(f"Ошибка уведомления админа при старте: {e}")
 
-@flask_app.route("/", methods=["GET"])
-async def health_check():
-    logger.info(f"Получен запрос на /: headers={request.headers}")
-    return "Bot is running!", 200
-
-@flask_app.route("/webhook", methods=["POST", "GET"])
-async def webhook():
-    global app
-    logger.info(f"Получен запрос на вебхук: метод={request.method}, url={request.url}, headers={request.headers}")
-    if not app:
-        logger.error("Application не инициализирован")
-        return "Application not initialized", 500
-    if request.method == "GET":
-        logger.info("GET-запрос на вебхук, возвращаем OK для проверки")
-        return "OK", 200
-    try:
-        json_data = request.get_json(force=True)
-        logger.info(f"Получены данные вебхука: {json_data}")
-        if not json_data or 'update_id' not in json_data:
-            logger.warning("Получен невалидный JSON вебхука")
-            return "Invalid webhook JSON", 400
-        if 'message' in json_data and 'date' not in json_data['message']:
-            logger.warning("Отсутствует поле 'date' в message")
-            return "Missing 'date' in message", 400
-        update = Update.de_json(json_data, app.bot)
-        if not update:
-            logger.warning("Получено пустое обновление")
-            return "Empty update", 400
-        logger.info(f"Обновление получено: update_id={update.update_id}, type={type(update)}")
-        await app.process_update(update)
-        logger.info(f"Обновление {update.update_id} обработано")
-        return "OK", 200
-    except Exception as e:
-        logger.error(f"Ошибка в вебхуке: {str(e)}")
-        return f"Error processing webhook: {str(e)}", 500
-
 async def main_async():
-    global app
     logger.info(f"Бот стартовал с Python {os.sys.version}")
     logger.info(f"Используемый токен: {TOKEN[:10]}...{TOKEN[-10:]}")
     try:
-        app = Application.builder().token(TOKEN).updater(None).build()
-        await app.initialize()  # Инициализация Application
+        app = Application.builder().token(TOKEN).build()
+        await app.initialize()
         logger.info("Application успешно инициализирован")
     except Exception as e:
         logger.error(f"Ошибка инициализации бота: {e}")
@@ -838,24 +790,17 @@ async def main_async():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.StatusUpdate.ALL, lambda u, c: None))
     app.add_error_handler(error_handler)
-    
-    # Уведомление админа при старте
+
     await notify_admin_on_start(app)
-    
-    # Запускаем Hypercorn сервер
-    port = int(os.getenv("PORT", 8080))
-    logger.info(f"Запускаем Flask на порту {port} с Hypercorn")
-    config = Config()
-    config.bind = [f"0.0.0.0:{port}"]
-    # Запускаем сервер в фоновой задаче
-    server_task = asyncio.create_task(serve(flask_app, config))
-    
-    # Ждём завершения сервера (или прерывания)
+    await app.updater.start_polling()
+    await app.start()
+    logger.info("Бот запущен в режиме polling")
     try:
-        await server_task
+        await asyncio.Event().wait()  # Бесконечное ожидание
     except asyncio.CancelledError:
-        logger.info("Сервер Hypercorn остановлен")
-        await app.shutdown()
+        logger.info("Бот остановлен")
+        await app.stop()
+        await app.updater.stop()
 
 if __name__ == "__main__":
     asyncio.run(main_async())
