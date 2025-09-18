@@ -836,11 +836,24 @@ async def main_async():
     # Уведомление админа при старте
     await notify_admin_on_start(app)
     
+    # Запускаем Hypercorn сервер
     port = int(os.getenv("PORT", 8080))
     logger.info(f"Запускаем Flask на порту {port} с Hypercorn")
     config = Config()
     config.bind = [f"0.0.0.0:{port}"]
-    await serve(flask_app, config)
+    # Запускаем сервер в текущем цикле событий
+    loop = asyncio.get_event_loop()
+    server_task = asyncio.ensure_future(serve(flask_app, config))
+    try:
+        await server_task
+    except asyncio.CancelledError:
+        logger.info("Сервер Hypercorn остановлен")
+        await app.shutdown()
 
 if __name__ == "__main__":
-    asyncio.run(main_async())
+    loop = asyncio.get_event_loop()
+    try:
+        loop.run_until_complete(main_async())
+    finally:
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.close()
