@@ -774,7 +774,7 @@ async def notify_admin_on_start(app: Application):
 
 @flask_app.route("/", methods=["GET"])
 async def health_check():
-    logger.info("Получен запрос на /")
+    logger.info(f"Получен запрос на /: headers={request.headers}")
     return "Bot is running!", 200
 
 @flask_app.route("/webhook", methods=["POST", "GET"])
@@ -808,6 +808,7 @@ async def main_async():
     logger.info(f"Используемый токен: {TOKEN[:10]}...{TOKEN[-10:]}")
     try:
         app = Application.builder().token(TOKEN).updater(None).build()
+        await app.initialize()  # Добавляем инициализацию
         logger.info("Application успешно инициализирован")
     except Exception as e:
         logger.error(f"Ошибка инициализации бота: {e}")
@@ -837,8 +838,5 @@ async def main_async():
     logger.info(f"Запускаем Flask на порту {port}")
     flask_app.run(host="0.0.0.0", port=port)
 
-def main():
-    asyncio.run(main_async())
-
 if __name__ == "__main__":
-    main()
+    main_async()
