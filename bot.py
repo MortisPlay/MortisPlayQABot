@@ -34,7 +34,7 @@ ADMIN_ID = 335236137
 QUESTIONS_FILE = "questions.json"
 BLACKLIST_FILE = "blacklist.json"
 QA_WEBSITE = "https://mortisplay.ru/qa.html"
-WEBHOOK_URL = "https://mortisplayqabot.up.railway.app/webhook"
+WEBHOOK_URL = "https://mortisplayqabot-production.up.railway.app/webhook"
 
 # Перевод статусов
 STATUS_TRANSLATIONS = {
@@ -790,9 +790,6 @@ async def webhook():
     try:
         json_data = request.get_json(force=True)
         logger.info(f"Получены данные вебхука: {json_data}")
-        if json_data.get("secret_token") != TOKEN:
-            logger.error(f"Неверный токен в вебхуке: {json_data.get('secret_token')}")
-            return "Invalid token", 403
         update = Update.de_json(json_data, app.bot)
         if not update:
             logger.warning("Получено пустое обновление")
