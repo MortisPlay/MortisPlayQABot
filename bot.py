@@ -18,8 +18,15 @@ TOKEN = os.getenv("TELEGRAM_TOKEN")
 if not TOKEN:
     raise ValueError("TELEGRAM_TOKEN не задан в переменной окружения или .env файле!")
 
-# Настройка логирования
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", filename="bot.log")
+# Настройка логирования (stdout + файл)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(),  # Вывод в stdout для Railway
+        logging.FileHandler("bot.log", encoding="utf-8")
+    ]
+)
 logger = logging.getLogger(__name__)
 
 # Константы
@@ -27,7 +34,7 @@ ADMIN_ID = 335236137
 QUESTIONS_FILE = "questions.json"
 BLACKLIST_FILE = "blacklist.json"
 QA_WEBSITE = "https://mortisplay.ru/qa.html"
-WEBHOOK_URL = f"https://mortisplayqabot.onrender.com/{TOKEN}"  # Для логов
+WEBHOOK_URL = f"https://mortisplayqabot.up.railway.app/{TOKEN}"
 
 # Перевод статусов
 STATUS_TRANSLATIONS = {
@@ -68,6 +75,7 @@ def check_blacklist(question: str) -> bool:
         return False
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Команда /start от user_id {update.effective_user.id}")
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
         return
@@ -89,6 +97,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Команда /help от user_id {update.effective_user.id}")
+    # ... (остальной код для /help без изменений, как в предыдущей версии)
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
         return
@@ -120,6 +130,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def list_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Команда /list от user_id {update.effective_user.id}")
+    # ... (остальной код для /list без изменений)
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
         return
@@ -153,6 +165,8 @@ async def list_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Админ запросил список вопросов: {len(data['questions'])} вопросов")
 
 async def my_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Команда /myquestions от user_id {update.effective_user.id}")
+    # ... (остальной код для /myquestions без изменений)
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
         return
@@ -185,6 +199,8 @@ async def my_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Пользователь user_id {user_id} запросил свои вопросы: {len(user_questions)} вопросов")
 
 async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Команда /ask от user_id {update.effective_user.id}")
+    # ... (остальной код для /ask без изменений)
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
         return
@@ -289,6 +305,8 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def notify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Callback notify от user_id {update.effective_user.id}")
+    # ... (остальной код для notify_callback без изменений)
     query = update.callback_query
     await query.answer()
     question_id = int(query.data.split("_")[1])
@@ -326,6 +344,8 @@ async def notify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Пользователь user_id {user_id} включил уведомления для вопроса ID {question_id}")
 
 async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Команда /approve от user_id {update.effective_user.id}")
+    # ... (остальной код для /approve без изменений)
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
         return
@@ -426,6 +446,8 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Ошибка в /approve: неверный формат ID, команда: {update.message.text}")
 
 async def reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Команда /reject от user_id {update.effective_user.id}")
+    # ... (остальной код для /reject без изменений)
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
         return
@@ -503,6 +525,8 @@ async def reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Ошибка в /reject: неверный формат ID, команда: {update.message.text}")
 
 async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Команда /clear от user_id {update.effective_user.id}")
+    # ... (остальной код для /clear без изменений)
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
         return
@@ -531,6 +555,8 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Ошибка очистки вопросов! 😿 Свяжитесь с разработчиком.", parse_mode="Markdown")
 
 async def delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Команда /delete от user_id {update.effective_user.id}")
+    # ... (остальной код для /delete без изменений)
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
         return
@@ -596,6 +622,8 @@ async def delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Ошибка в /delete: неверный формат ID, команда: {update.message.text}")
 
 async def edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Команда /edit от user_id {update.effective_user.id}")
+    # ... (остальной код для /edit без изменений)
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
         return
@@ -678,6 +706,8 @@ async def edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Ошибка в /edit: неверный формат ID, команда: {update.message.text}")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Сообщение от user_id {update.effective_user.id}: {update.message.text}")
+    # ... (остальной код для handle_message без изменений)
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное, удалённое или пустое сообщение")
         return
@@ -699,6 +729,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Callback button от user_id {update.effective_user.id}: {update.callback_query.data}")
+    # ... (остальной код для button_callback без изменений)
     query = update.callback_query
     await query.answer()
     if query.data == "ask":
@@ -761,6 +793,17 @@ async def webhook():
         logger.error(f"Ошибка в вебхуке: {e}")
         return "Error processing webhook", 500
 
+async def notify_admin_on_start(app: Application):
+    try:
+        await app.bot.send_message(
+            chat_id=ADMIN_ID,
+            text="**Бот запустился на Railway!** 😎 *Кот одобряет* 🐾",
+            parse_mode="Markdown"
+        )
+        logger.info("Уведомление админу о старте отправлено")
+    except Exception as e:
+        logger.error(f"Ошибка уведомления админа при старте: {e}")
+
 def main():
     global app
     logger.info(f"Бот стартовал с Python {os.sys.version}")
@@ -788,7 +831,11 @@ def main():
     app.add_handler(MessageHandler(filters.StatusUpdate.ALL, lambda u, c: None))
     app.add_error_handler(error_handler)
     
-    flask_app.run(host="0.0.0.0", port=10000)
+    # Уведомление админа при старте
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(notify_admin_on_start(app))
+    
+    flask_app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
 
 if __name__ == "__main__":
     main()
