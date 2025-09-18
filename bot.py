@@ -792,6 +792,12 @@ async def webhook():
     try:
         json_data = request.get_json(force=True)
         logger.info(f"Получены данные вебхука: {json_data}")
+        if not json_data or 'update_id' not in json_data:
+            logger.warning("Получен невалидный JSON вебхука")
+            return "Invalid webhook JSON", 400
+        if 'message' in json_data and 'date' not in json_data['message']:
+            logger.warning("Отсутствует поле 'date' в message")
+            return "Missing 'date' in message", 400
         update = Update.de_json(json_data, app.bot)
         if not update:
             logger.warning("Получено пустое обновление")
@@ -841,19 +847,15 @@ async def main_async():
     logger.info(f"Запускаем Flask на порту {port} с Hypercorn")
     config = Config()
     config.bind = [f"0.0.0.0:{port}"]
-    # Запускаем сервер в текущем цикле событий
-    asyncio.create_task(serve(flask_app, config))
-    # Держим цикл событий открытым
-    await asyncio.Event().wait()
+    # Запускаем сервер в фоновой задаче
+    server_task = asyncio.create_task(serve(flask_app, config))
+    
+    # Ждём завершения сервера (или прерывания)
+    try:
+        await server_task
+    except asyncio.CancelledError:
+        logger.info("Сервер Hypercorn остановлен")
+        await app.shutdown()
 
 if __name__ == "__main__":
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        loop.run_until_complete(main_async())
-    except KeyboardInterrupt:
-        logger.info("Бот остановлен пользователем")
-        loop.run_until_complete(app.shutdown())
-    finally:
-        loop.run_until_complete(loop.shutdown_asyncgens())
-        loop.close()
+    asyncio.run(main_async())
