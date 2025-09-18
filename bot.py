@@ -98,7 +98,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Команда /help от user_id {update.effective_user.id}")
-    # ... (остальной код для /help без изменений, как в предыдущей версии)
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
         return
@@ -131,7 +130,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def list_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Команда /list от user_id {update.effective_user.id}")
-    # ... (остальной код для /list без изменений)
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
         return
@@ -166,7 +164,6 @@ async def list_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def my_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Команда /myquestions от user_id {update.effective_user.id}")
-    # ... (остальной код для /myquestions без изменений)
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
         return
@@ -200,7 +197,6 @@ async def my_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Команда /ask от user_id {update.effective_user.id}")
-    # ... (остальной код для /ask без изменений)
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
         return
@@ -306,7 +302,6 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def notify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Callback notify от user_id {update.effective_user.id}")
-    # ... (остальной код для notify_callback без изменений)
     query = update.callback_query
     await query.answer()
     question_id = int(query.data.split("_")[1])
@@ -345,7 +340,6 @@ async def notify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Команда /approve от user_id {update.effective_user.id}")
-    # ... (остальной код для /approve без изменений)
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
         return
@@ -447,7 +441,6 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Команда /reject от user_id {update.effective_user.id}")
-    # ... (остальной код для /reject без изменений)
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
         return
@@ -526,7 +519,6 @@ async def reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Команда /clear от user_id {update.effective_user.id}")
-    # ... (остальной код для /clear без изменений)
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
         return
@@ -556,7 +548,6 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Команда /delete от user_id {update.effective_user.id}")
-    # ... (остальной код для /delete без изменений)
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
         return
@@ -623,7 +614,6 @@ async def delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Команда /edit от user_id {update.effective_user.id}")
-    # ... (остальной код для /edit без изменений)
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
         return
@@ -707,7 +697,6 @@ async def edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Сообщение от user_id {update.effective_user.id}: {update.message.text}")
-    # ... (остальной код для handle_message без изменений)
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное, удалённое или пустое сообщение")
         return
@@ -730,7 +719,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Callback button от user_id {update.effective_user.id}: {update.callback_query.data}")
-    # ... (остальной код для button_callback без изменений)
     query = update.callback_query
     await query.answer()
     if query.data == "ask":
@@ -773,26 +761,6 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Не удалось уведомить админа об ошибке: {e}")
 
-@flask_app.route(f"/{TOKEN}", methods=["POST"])
-async def webhook():
-    global app
-    logger.info("Получен запрос на вебхук")
-    if not app:
-        logger.error("Application не инициализирован")
-        return "Application not initialized", 500
-    try:
-        update = Update.de_json(request.get_json(force=True), app.bot)
-        logger.info(f"Получено обновление: {update}")
-        if update:
-            await app.process_update(update)
-            logger.info(f"Обновление {update.update_id} обработано")
-        else:
-            logger.warning("Получено пустое обновление")
-        return "OK", 200
-    except Exception as e:
-        logger.error(f"Ошибка в вебхуке: {e}")
-        return "Error processing webhook", 500
-
 async def notify_admin_on_start(app: Application):
     try:
         await app.bot.send_message(
@@ -804,9 +772,40 @@ async def notify_admin_on_start(app: Application):
     except Exception as e:
         logger.error(f"Ошибка уведомления админа при старте: {e}")
 
-def main():
+@flask_app.route("/", methods=["GET"])
+async def health_check():
+    logger.info("Получен запрос на /")
+    return "Bot is running!", 200
+
+@flask_app.route(f"/webhook/{TOKEN}", methods=["POST", "GET"])  # Изменён маршрут
+async def webhook():
+    global app
+    logger.info(f"Получен запрос на вебхук: метод={request.method}, url={request.url}")
+    if not app:
+        logger.error("Application не инициализирован")
+        return "Application not initialized", 500
+    if request.method == "GET":
+        logger.info("GET-запрос на вебхук, возвращаем OK для проверки")
+        return "OK", 200
+    try:
+        json_data = request.get_json(force=True)
+        logger.info(f"Получены данные вебхука: {json_data}")
+        update = Update.de_json(json_data, app.bot)
+        if not update:
+            logger.warning("Получено пустое обновление")
+            return "Empty update", 400
+        logger.info(f"Обновление получено: update_id={update.update_id}, type={type(update)}")
+        await app.process_update(update)
+        logger.info(f"Обновление {update.update_id} обработано")
+        return "OK", 200
+    except Exception as e:
+        logger.error(f"Ошибка в вебхуке: {str(e)}")
+        return f"Error processing webhook: {str(e)}", 500
+
+async def main_async():
     global app
     logger.info(f"Бот стартовал с Python {os.sys.version}")
+    logger.info(f"Используемый токен: {TOKEN[:10]}...{TOKEN[-10:]}")
     try:
         app = Application.builder().token(TOKEN).updater(None).build()
         logger.info("Application успешно инициализирован")
@@ -832,10 +831,14 @@ def main():
     app.add_error_handler(error_handler)
     
     # Уведомление админа при старте
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(notify_admin_on_start(app))
+    await notify_admin_on_start(app)
     
-    flask_app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
+    port = int(os.getenv("PORT", 8080))
+    logger.info(f"Запускаем Flask на порту {port}")
+    flask_app.run(host="0.0.0.0", port=port)
+
+def main():
+    asyncio.run(main_async())
 
 if __name__ == "__main__":
     main()
