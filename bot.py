@@ -842,18 +842,18 @@ async def main_async():
     config = Config()
     config.bind = [f"0.0.0.0:{port}"]
     # Запускаем сервер в текущем цикле событий
-    loop = asyncio.get_event_loop()
-    server_task = asyncio.ensure_future(serve(flask_app, config))
-    try:
-        await server_task
-    except asyncio.CancelledError:
-        logger.info("Сервер Hypercorn остановлен")
-        await app.shutdown()
+    asyncio.create_task(serve(flask_app, config))
+    # Держим цикл событий открытым
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     try:
         loop.run_until_complete(main_async())
+    except KeyboardInterrupt:
+        logger.info("Бот остановлен пользователем")
+        loop.run_until_complete(app.shutdown())
     finally:
         loop.run_until_complete(loop.shutdown_asyncgens())
         loop.close()
