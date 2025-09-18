@@ -830,8 +830,7 @@ async def main_async():
     app.add_handler(CallbackQueryHandler(button_callback, pattern="^(ask|myquestions)$"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.StatusUpdate.ALL, lambda u, c: None))
-    app.add_handler(error_handler)
-    
+    app.add_error_handler(error_handler)  # Исправлено: используем add_error_handler
     # Уведомление админа при старте
     await notify_admin_on_start(app)
     
