@@ -8,7 +8,8 @@ from telegram.helpers import escape_markdown
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from dotenv import load_dotenv
 from flask import Flask, request
-import threading
+from hypercorn.config import Config
+from hypercorn.asyncio import serve
 
 # Flask для вебхуков
 flask_app = Flask(__name__)
@@ -830,16 +831,16 @@ async def main_async():
     app.add_handler(CallbackQueryHandler(button_callback, pattern="^(ask|myquestions)$"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.StatusUpdate.ALL, lambda u, c: None))
-    app.add_error_handler(error_handler)  # Исправлено: используем add_error_handler
+    app.add_error_handler(error_handler)
+    
     # Уведомление админа при старте
     await notify_admin_on_start(app)
     
     port = int(os.getenv("PORT", 8080))
-    logger.info(f"Запускаем Flask на порту {port}")
-    # Запускаем Flask в отдельном потоке
-    def run_flask():
-        flask_app.run(host="0.0.0.0", port=port)
-    threading.Thread(target=run_flask, daemon=True).start()
+    logger.info(f"Запускаем Flask на порту {port} с Hypercorn")
+    config = Config()
+    config.bind = [f"0.0.0.0:{port}"]
+    await serve(flask_app, config)
 
 if __name__ == "__main__":
     asyncio.run(main_async())
