@@ -4,6 +4,7 @@ import os
 import time
 import asyncio
 import hashlib
+import re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.helpers import escape_markdown
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
@@ -74,6 +75,37 @@ def check_blacklist(question: str) -> bool:
         logger.error(f"Ошибка чтения {BLACKLIST_FILE}: {e}")
         return False
 
+def check_question_meaning(question: str) -> bool:
+    """Проверяет, имеет ли вопрос смысл."""
+    question_lower = question.lower().strip()
+    
+    # Проверка минимальной длины
+    if len(question_lower) < 10:
+        logger.info(f"Вопрос отклонён как бессмысленный: слишком короткий ({len(question_lower)} символов)")
+        return False
+    
+    # Проверка на повторяющиеся символы (например, "ааааа" или "!!!!")
+    if re.match(r'^(.)\1{4,}$', question_lower.replace(' ', '')) or re.match(r'^(\W)\1{4,}$', question_lower):
+        logger.info(f"Вопрос отклонён как бессмысленный: повторяющиеся символы ({question})")
+        return False
+    
+    # Проверка на повторяющиеся слова (например, "лол лол лол")
+    words = question_lower.split()
+    if len(words) > 1 and len(set(words)) == 1:
+        logger.info(f"Вопрос отклонён как бессмысленный: повторяющиеся слова ({question})")
+        return False
+    
+    # Проверка на наличие вопросительных слов
+    question_words = ["что", "как", "почему", "где", "когда", "какой", "какая", "какое", "кто", "зачем", "сколько"]
+    has_question_word = any(word in question_lower for word in question_words) or "?" in question_lower
+    has_multiple_words = len(words) >= 3  # Требуем минимум 3 слова для осмысленности
+    
+    if not (has_question_word or has_multiple_words):
+        logger.info(f"Вопрос отклонён как бессмысленный: нет вопросительных слов или слишком прост ({question})")
+        return False
+    
+    return True
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Команда /start от user_id {update.effective_user.id}")
     if not update.message or not update.message.text:
@@ -124,7 +156,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "- `/delete <id>` — *Только для админа*, удаляет вопрос по ID\n"
         "- `/edit <id> <новый_вопрос>` — *Только для админа*, редактирует вопрос по ID\n"
         "- `/cancel <id>` — *Только для админа*, аннулирует вопрос по ID\n\n"
-        "Пиши `/ask` или жми кнопки ниже, чтобы начать! 🚀",
+        "*Важно*: Вопрос должен быть осмысленным (например, содержать вопросительное слово или быть достаточно подробным). Бессмысленные вопросы отклоняются без траты попыток! 🚀\n"
+        "Пиши `/ask` или жми кнопки ниже, чтобы начать!",
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
@@ -212,6 +245,15 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = user.id
     question = " ".join(context.args) if context.args else update.message.text
     question_hash = get_question_hash(question)
+
+    # Проверка на осмысленность вопроса
+    if not check_question_meaning(question):
+        await update.message.reply_text(
+            "Йоу, твой вопрос *кажется бессмысленным*! 😿 Попробуй задать что-то вроде: `Какую игру ты стримишь чаще всего?`",
+            parse_mode="Markdown"
+        )
+        logger.info(f"Вопрос отклонён как бессмысленный от user_id {user_id}: {question}")
+        return
 
     current_time = time.time()
     if user_id in spam_protection:
@@ -698,11 +740,13 @@ async def delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Удаление хэша вопроса
         for user_id, hashes in question_hashes.items():
-            if any(q["id"] == question_id for q in data["questions"]):
-                question_hash = get_question_hash(data["questions"][["id"] - 1]["question"])
-                if question_hash in hashes:
-                    hashes.remove(question_hash)
-                    logger.info(f"Хэш вопроса ID {question_id} удалён для user_id {user_id}")
+            for q in data["questions"]:
+                if q["id"] == question_id:
+                    question_hash = get_question_hash(q["question"])
+                    if question_hash in hashes:
+                        hashes.remove(question_hash)
+                        logger.info(f"Хэш вопроса ID {question_id} удалён для user_id {user_id}")
+                    break
 
         await update.message.reply_text(
             f"Вопрос `{question_id}` *удалён*!",
@@ -752,6 +796,14 @@ async def edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown"
             )
             logger.error(f"Ошибка в /edit: недопустимая длина вопроса, команда: {update.message.text}")
+            return
+
+        if not check_question_meaning(new_question):
+            await update.message.reply_text(
+                "Йоу, новый вопрос *кажется бессмысленным*! 😿 Попробуй что-то вроде: `Какую игру ты стримишь чаще всего?`",
+                parse_mode="Markdown"
+            )
+            logger.info(f"Новый вопрос отклонён как бессмысленный: {new_question}")
             return
 
         if check_blacklist(new_question):
