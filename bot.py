@@ -3,6 +3,7 @@ import logging
 import os
 import time
 import asyncio
+import hashlib
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.helpers import escape_markdown
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
@@ -13,7 +14,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.StreamHandler(),  # Вывод в stdout для Railway
+        logging.StreamHandler(),
         logging.FileHandler("bot.log", encoding="utf-8")
     ]
 )
@@ -30,12 +31,14 @@ ADMIN_ID = 335236137
 QUESTIONS_FILE = "questions.json"
 BLACKLIST_FILE = "blacklist.json"
 QA_WEBSITE = "https://mortisplay.ru/qa.html"
+MAX_PENDING_QUESTIONS = 3  # Ограничение на количество ожидающих вопросов от пользователя
 
 # Перевод статусов
 STATUS_TRANSLATIONS = {
     "pending": "Рассматривается",
     "approved": "Принят",
-    "rejected": "Отклонён"
+    "rejected": "Отклонён",
+    "cancelled": "Аннулирован"
 }
 
 # Инициализация JSON
@@ -50,6 +53,11 @@ if not os.path.exists(BLACKLIST_FILE):
 # Защита от спама
 spam_protection = {}
 processed_updates = set()
+question_hashes = {}  # Для хранения хэшей вопросов
+
+def get_question_hash(question: str) -> str:
+    """Генерирует MD5 хэш вопроса для проверки дубликатов."""
+    return hashlib.md5(question.lower().encode('utf-8')).hexdigest()
 
 def check_blacklist(question: str) -> bool:
     try:
@@ -114,7 +122,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "- `/list` — *Только для админа*, показывает все вопросы\n"
         "- `/clear` — *Только для админа*, очищает все вопросы\n"
         "- `/delete <id>` — *Только для админа*, удаляет вопрос по ID\n"
-        "- `/edit <id> <новый_вопрос>` — *Только для админа*, редактирует вопрос по ID\n\n"
+        "- `/edit <id> <новый_вопрос>` — *Только для админа*, редактирует вопрос по ID\n"
+        "- `/cancel <id>` — *Только для админа*, аннулирует вопрос по ID\n\n"
         "Пиши `/ask` или жми кнопки ниже, чтобы начать! 🚀",
         reply_markup=reply_markup,
         parse_mode="Markdown"
@@ -143,16 +152,17 @@ async def list_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Ошибка чтения вопросов! 😿 Свяжитесь с разработчиком.", parse_mode="Markdown")
         return
 
-    if not data.get("questions"):
-        await update.message.reply_text("Пока *нет вопросов*! 😿", parse_mode="Markdown")
-        logger.info("Список вопросов пуст")
+    active_questions = [q for q in data["questions"] if q.get("cancelled", False) == False]
+    if not active_questions:
+        await update.message.reply_text("Пока *нет активных вопросов*! 😿", parse_mode="Markdown")
+        logger.info("Список активных вопросов пуст")
         return
-    response = "*Список вопросов*:\n"
-    for q in data["questions"]:
+    response = "*Список активных вопросов*:\n"
+    for q in active_questions:
         status = STATUS_TRANSLATIONS.get(q["status"], q["status"])
         response += f"ID: `{q['id']}`, От: @{q['username']}, Вопрос: *{q['question']}*, Статус: `{status}`\n"
     await update.message.reply_text(response, parse_mode="Markdown")
-    logger.info(f"Админ запросил список вопросов: {len(data['questions'])} вопросов")
+    logger.info(f"Админ запросил список вопросов: {len(active_questions)} активных вопросов")
 
 async def my_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Команда /myquestions от user_id {update.effective_user.id}")
@@ -174,18 +184,18 @@ async def my_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Ошибка чтения вопросов! 😿 Свяжитесь с разработчиком.", parse_mode="Markdown")
         return
 
-    user_questions = [q for q in data["questions"] if q["user_id"] == user_id]
+    user_questions = [q for q in data["questions"] if q["user_id"] == user_id and q.get("cancelled", False) == False]
     if not user_questions:
-        await update.message.reply_text("Ты ещё *не задал вопрос*! 😿 Пиши `/ask <вопрос>`", parse_mode="Markdown")
-        logger.info(f"Пользователь user_id {user_id} запросил свои вопросы: список пуст")
+        await update.message.reply_text("Ты ещё *не задал активных вопросов*! 😿 Пиши `/ask <вопрос>`", parse_mode="Markdown")
+        logger.info(f"Пользователь user_id {user_id} запросил свои вопросы: список активных вопросов пуст")
         return
-    response = "*Твои вопросы*:\n"
+    response = "*Твои активные вопросы*:\n"
     for q in user_questions:
         status = STATUS_TRANSLATIONS.get(q["status"], q["status"])
         answer = f", Ответ: *{q['answer']}*" if q["status"] == "approved" and "answer" in q else ""
         response += f"ID: `{q['id']}`, Вопрос: *{q['question']}*, Статус: `{status}`{answer}\n"
     await update.message.reply_text(response, parse_mode="Markdown")
-    logger.info(f"Пользователь user_id {user_id} запросил свои вопросы: {len(user_questions)} вопросов")
+    logger.info(f"Пользователь user_id {user_id} запросил свои вопросы: {len(user_questions)} активных вопросов")
 
 async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Команда /ask от user_id {update.effective_user.id}")
@@ -201,19 +211,36 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
     user_id = user.id
     question = " ".join(context.args) if context.args else update.message.text
+    question_hash = get_question_hash(question)
 
     current_time = time.time()
     if user_id in spam_protection:
         last_ask_time = spam_protection[user_id]["last_ask_time"]
-        last_question = spam_protection[user_id]["last_question"]
         if current_time - last_ask_time < 60:
             await update.message.reply_text("Йоу, *не так быстро*! 😎 Один вопрос в минуту!", parse_mode="Markdown")
             logger.info(f"Спам-атака от user_id {user_id}: слишком частые вопросы")
             return
-        if question == last_question:
-            await update.message.reply_text("Эй, ты *уже спрашивал* это! 😕 Попробуй другой вопрос.", parse_mode="Markdown")
-            logger.info(f"Дубликат вопроса от user_id {user_id}: {question}")
-            return
+
+    try:
+        with open(QUESTIONS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        logger.error(f"Ошибка чтения {QUESTIONS_FILE}: {e}")
+        await update.message.reply_text("Ошибка записи вопроса! 😿 Свяжитесь с разработчиком.", parse_mode="Markdown")
+        return
+
+    # Проверка на дубликат по хэшу
+    if question_hash in question_hashes.get(user_id, []):
+        await update.message.reply_text("Эй, ты *уже спрашивал* это или очень похожее! 😕 Попробуй другой вопрос.", parse_mode="Markdown")
+        logger.info(f"Дубликат вопроса от user_id {user_id}: {question}")
+        return
+
+    # Проверка на максимальное количество ожидающих вопросов
+    pending_questions = [q for q in data["questions"] if q["user_id"] == user_id and q["status"] == "pending" and q.get("cancelled", False) == False]
+    if len(pending_questions) >= MAX_PENDING_QUESTIONS:
+        await update.message.reply_text(f"Йоу, у тебя уже *{MAX_PENDING_QUESTIONS} вопроса* на рассмотрении! 😎 Дождись ответа или попробуй позже.", parse_mode="Markdown")
+        logger.info(f"Превышен лимит ожидающих вопросов для user_id {user_id}: {len(pending_questions)}")
+        return
 
     if not context.args and update.message.text.startswith("/ask"):
         await update.message.reply_text(
@@ -238,14 +265,6 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Вопрос отклонён из-за чёрного списка: {question}")
         return
 
-    try:
-        with open(QUESTIONS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (json.JSONDecodeError, IOError) as e:
-        logger.error(f"Ошибка чтения {QUESTIONS_FILE}: {e}")
-        await update.message.reply_text("Ошибка записи вопроса! 😿 Свяжитесь с разработчиком.", parse_mode="Markdown")
-        return
-
     question_id = len(data["questions"]) + 1
     data["questions"].append({
         "id": question_id,
@@ -253,7 +272,8 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "username": user.username or "Аноним",
         "question": question,
         "status": "pending",
-        "notify": False
+        "notify": False,
+        "cancelled": False
     })
 
     try:
@@ -264,6 +284,10 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Ошибка записи вопроса! 😿 Свяжитесь с разработчиком.", parse_mode="Markdown")
         return
 
+    # Обновление хэшей вопросов
+    if user_id not in question_hashes:
+        question_hashes[user_id] = []
+    question_hashes[user_id].append(question_hash)
     spam_protection[user_id] = {"last_ask_time": current_time, "last_question": question}
 
     keyboard = [[InlineKeyboardButton("Уведомить о результате 🔔", callback_data=f"notify_{question_id}")]]
@@ -280,7 +304,7 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await context.bot.send_message(
             chat_id=ADMIN_ID,
-            text=f"*Новый вопрос* \\(ID: `{question_id}`\\)\nОт: @{escaped_username}\nВопрос: *{escaped_question}*\n`/approve {question_id} <ответ>` — принять\n`/reject {question_id}` — отклонить",
+            text=f"*Новый вопрос* \\(ID: `{question_id}`\\)\nОт: @{escaped_username}\nВопрос: *{escaped_question}*\n`/approve {question_id} <ответ>` — принять\n`/reject {question_id}` — отклонить\n`/cancel {question_id}` — аннулировать",
             parse_mode="MarkdownV2"
         )
         logger.info(f"Уведомление админу отправлено: вопрос ID {question_id} от @{user.username or 'Аноним'}")
@@ -288,7 +312,7 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Ошибка отправки уведомления админу: {e}")
         await context.bot.send_message(
             chat_id=ADMIN_ID,
-            text=f"*Новый вопрос* (ID: {question_id})\nОт: @{user.username or 'Аноним'}\nВопрос: {question}\n`/approve {question_id} <ответ>` — принять\n`/reject {question_id}` — отклонить",
+            text=f"*Новый вопрос* (ID: {question_id})\nОт: @{user.username or 'Аноним'}\nВопрос: {question}\n`/approve {question_id} <ответ>` — принять\n`/reject {question_id}` — отклонить\n`/cancel {question_id}` — аннулировать",
             parse_mode=None
         )
 
@@ -308,12 +332,12 @@ async def notify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     for q in data["questions"]:
-        if q["id"] == question_id and q["user_id"] == user_id:
+        if q["id"] == question_id and q["user_id"] == user_id and not q.get("cancelled", False):
             q["notify"] = True
             break
     else:
-        await query.message.reply_text("Вопрос не найден! 😿", parse_mode="Markdown")
-        logger.warning(f"Вопрос ID {question_id} не найден для уведомления user_id {user_id}")
+        await query.message.reply_text("Вопрос не найден или аннулирован! 😿", parse_mode="Markdown")
+        logger.warning(f"Вопрос ID {question_id} не найден или аннулирован для уведомления user_id {user_id}")
         return
 
     try:
@@ -376,7 +400,7 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         for q in data["questions"]:
-            if q["id"] == question_id and q["status"] == "pending":
+            if q["id"] == question_id and q["status"] == "pending" and not q.get("cancelled", False):
                 q["status"] = "approved"
                 q["answer"] = answer
                 website_button = [[InlineKeyboardButton("Посмотреть на сайте 🌐", url=QA_WEBSITE)]]
@@ -402,10 +426,10 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 break
         else:
             await update.message.reply_text(
-                f"Вопрос с ID `{question_id}` *не найден* или уже обработан!",
+                f"Вопрос с ID `{question_id}` *не найден*, уже обработан или аннулирован!",
                 parse_mode="Markdown"
             )
-            logger.warning(f"Вопрос ID {question_id} не найден или уже обработан")
+            logger.warning(f"Вопрос ID {question_id} не найден, уже обработан или аннулирован")
             return
 
         try:
@@ -468,7 +492,7 @@ async def reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         for q in data["questions"]:
-            if q["id"] == question_id and q["status"] == "pending":
+            if q["id"] == question_id and q["status"] == "pending" and not q.get("cancelled", False):
                 q["status"] = "rejected"
                 if q["notify"]:
                     try:
@@ -483,10 +507,10 @@ async def reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 break
         else:
             await update.message.reply_text(
-                f"Вопрос с ID `{question_id}` *не найден* или уже обработан!",
+                f"Вопрос с ID `{question_id}` *не найден*, уже обработан или аннулирован!",
                 parse_mode="Markdown"
             )
-            logger.warning(f"Вопрос ID {question_id} не найден или уже обработан")
+            logger.warning(f"Вопрос ID {question_id} не найден, уже обработан или аннулирован")
             return
 
         try:
@@ -509,6 +533,85 @@ async def reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         logger.error(f"Ошибка в /reject: неверный формат ID, команда: {update.message.text}")
 
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Команда /cancel от user_id {update.effective_user.id}")
+    if not update.message or not update.message.text:
+        logger.info("Пропущено невалидное или удалённое сообщение")
+        return
+    if update.message.from_user.id != ADMIN_ID:
+        await update.message.reply_text("Йоу, *только админ* может это делать! 😎", parse_mode="Markdown")
+        logger.warning(f"Неавторизованная попытка /cancel от user_id {update.message.from_user.id}")
+        return
+
+    update_id = update.update_id
+    if update_id in processed_updates:
+        logger.info(f"Дубликат update_id {update_id}, пропускаем")
+        return
+    processed_updates.add(update_id)
+
+    logger.info(f"Команда /cancel от админа: {update.message.text}")
+    args = context.args
+    if not args:
+        await update.message.reply_text(
+            "Укажи *ID вопроса*: `/cancel <id>`",
+            parse_mode="Markdown"
+        )
+        logger.error(f"Ошибка в /cancel: отсутствует ID, команда: {update.message.text}")
+        return
+
+    try:
+        question_id = int(args[0])
+        try:
+            with open(QUESTIONS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            logger.error(f"Ошибка чтения {QUESTIONS_FILE}: {e}")
+            await update.message.reply_text("Ошибка чтения вопросов! 😿 Свяжитесь с разработчиком.", parse_mode="Markdown")
+            return
+
+        for q in data["questions"]:
+            if q["id"] == question_id and not q.get("cancelled", False):
+                q["cancelled"] = True
+                q["status"] = "cancelled"
+                if q["notify"]:
+                    try:
+                        await context.bot.send_message(
+                            chat_id=q["user_id"],
+                            text="Твой вопрос *аннулирован* 😕 Свяжитесь с админом (@dimap7221) для уточнений!",
+                            parse_mode="Markdown"
+                        )
+                        logger.info(f"Уведомление об аннулировании отправлено user_id {q['user_id']} для вопроса ID {question_id}")
+                    except Exception as e:
+                        logger.error(f"Ошибка уведомления пользователя {q['user_id']}: {e}")
+                break
+        else:
+            await update.message.reply_text(
+                f"Вопрос с ID `{question_id}` *не найден* или уже аннулирован!",
+                parse_mode="Markdown"
+            )
+            logger.warning(f"Вопрос ID {question_id} не найден или уже аннулирован")
+            return
+
+        try:
+            with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except IOError as e:
+            logger.error(f"Ошибка записи в {QUESTIONS_FILE}: {e}")
+            await update.message.reply_text("Ошибка аннулирования вопроса! 😿 Свяжитесь с разработчиком.", parse_mode="Markdown")
+            return
+
+        await update.message.reply_text(
+            f"Вопрос `{question_id}` *аннулирован* 😿",
+            parse_mode="Markdown"
+        )
+        logger.info(f"Вопрос ID {question_id} аннулирован")
+    except ValueError:
+        await update.message.reply_text(
+            "ID вопроса должен быть *числом*: `/cancel <id>`",
+            parse_mode="Markdown"
+        )
+        logger.error(f"Ошибка в /cancel: неверный формат ID, команда: {update.message.text}")
+
 async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Команда /clear от user_id {update.effective_user.id}")
     if not update.message or not update.message.text:
@@ -529,11 +632,12 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
             json.dump({"questions": []}, f, ensure_ascii=False, indent=2)
+        question_hashes.clear()  # Очистка хэшей вопросов
         await update.message.reply_text(
             "Все вопросы *очищены*! 😺 ID начнётся с 1.",
             parse_mode="Markdown"
         )
-        logger.info("Все вопросы успешно очищены")
+        logger.info("Все вопросы и хэши успешно очищены")
     except IOError as e:
         logger.error(f"Ошибка записи в {QUESTIONS_FILE}: {e}")
         await update.message.reply_text("Ошибка очистки вопросов! 😿 Свяжитесь с разработчиком.", parse_mode="Markdown")
@@ -592,6 +696,14 @@ async def delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Ошибка удаления вопроса! 😿 Свяжитесь с разработчиком.", parse_mode="Markdown")
             return
 
+        # Удаление хэша вопроса
+        for user_id, hashes in question_hashes.items():
+            if any(q["id"] == question_id for q in data["questions"]):
+                question_hash = get_question_hash(data["questions"][["id"] - 1]["question"])
+                if question_hash in hashes:
+                    hashes.remove(question_hash)
+                    logger.info(f"Хэш вопроса ID {question_id} удалён для user_id {user_id}")
+
         await update.message.reply_text(
             f"Вопрос `{question_id}` *удалён*!",
             parse_mode="Markdown"
@@ -633,6 +745,7 @@ async def edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         question_id = int(args[0])
         new_question = " ".join(args[1:])
+        new_question_hash = get_question_hash(new_question)
         if len(new_question) < 5 or len(new_question) > 500:
             await update.message.reply_text(
                 "Новый вопрос должен быть от *5 до 500 символов*! 😎",
@@ -658,8 +771,9 @@ async def edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         for q in data["questions"]:
-            if q["id"] == question_id:
+            if q["id"] == question_id and not q.get("cancelled", False):
                 old_question = q["question"]
+                old_question_hash = get_question_hash(old_question)
                 q["question"] = new_question
                 try:
                     with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
@@ -667,6 +781,12 @@ async def edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except IOError as e:
                     logger.error(f"Ошибка записи в {QUESTIONS_FILE}: {e}")
                     await update.message.reply_text("Ошибка редактирования вопроса! 😿 Свяжитесь с разработчиком.", parse_mode="Markdown")
+                # Обновление хэша вопроса
+                for user_id, hashes in question_hashes.items():
+                    if old_question_hash in hashes:
+                        hashes.remove(old_question_hash)
+                        hashes.append(new_question_hash)
+                        logger.info(f"Хэш вопроса ID {question_id} обновлён для user_id {user_id}")
                 await update.message.reply_text(
                     f"Вопрос `{question_id}` *отредактирован*! 😺\nСтарый: *{old_question}*\nНовый: *{new_question}*",
                     parse_mode="Markdown"
@@ -675,10 +795,10 @@ async def edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
         await update.message.reply_text(
-            f"Вопрос с ID `{question_id}` *не найден*! 😿",
+            f"Вопрос с ID `{question_id}` *не найден* или аннулирован! 😿",
             parse_mode="Markdown"
         )
-        logger.warning(f"Вопрос ID {question_id} не найден для редактирования")
+        logger.warning(f"Вопрос ID {question_id} не найден или аннулирован для редактирования")
     except ValueError:
         await update.message.reply_text(
             "ID вопроса должен быть *числом*: `/edit <id> <новый_вопрос>`",
@@ -699,7 +819,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if update.message.from_user.id == ADMIN_ID:
         await update.message.reply_text(
-            "Йоу, *админ*! Используй `/approve`, `/reject`, `/list`, `/clear`, `/delete`, `/edit` или `/ask` для теста вопроса 😎",
+            "Йоу, *админ*! Используй `/approve`, `/reject`, `/cancel`, `/list`, `/clear`, `/delete`, `/edit` или `/ask` для теста вопроса 😎",
             parse_mode="Markdown"
         )
     else:
@@ -727,14 +847,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("Ошибка чтения вопросов! 😿 Свяжитесь с разработчиком.", parse_mode="Markdown")
             return
 
-        user_questions = [q for q in data["questions"] if q["user_id"] == user_id]
+        user_questions = [q for q in data["questions"] if q["user_id"] == user_id and q.get("cancelled", False) == False]
         if not user_questions:
             await query.message.reply_text(
-                "Ты ещё *не задал вопросов*! 😿 Пиши `/ask <вопрос>`",
+                "Ты ещё *не задал активных вопросов*! 😿 Пиши `/ask <вопрос>`",
                 parse_mode="Markdown"
             )
             return
-        response = "*Твои вопросы*:\n"
+        response = "*Твои активные вопросы*:\n"
         for q in user_questions:
             status = STATUS_TRANSLATIONS.get(q["status"], q["status"])
             answer = f", Ответ: *{q['answer']}*" if q["status"] == "approved" and "answer" in q else ""
@@ -782,6 +902,7 @@ async def main_async():
     app.add_handler(CommandHandler("ask", ask))
     app.add_handler(CommandHandler("approve", approve))
     app.add_handler(CommandHandler("reject", reject))
+    app.add_handler(CommandHandler("cancel", cancel))
     app.add_handler(CommandHandler("clear", clear))
     app.add_handler(CommandHandler("delete", delete))
     app.add_handler(CommandHandler("edit", edit))
