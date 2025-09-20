@@ -193,9 +193,15 @@ async def list_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     response = "*Список активных вопросов*:\n"
     for q in active_questions:
         status = STATUS_TRANSLATIONS.get(q["status"], q["status"])
-        response += f"ID: `{q['id']}`, От: @{q['username']}, Вопрос: *{q['question']}*, Статус: `{status}`\n"
-    await update.message.reply_text(response, parse_mode="Markdown")
-    logger.info(f"Админ запросил список вопросов: {len(active_questions)} активных вопросов")
+        escaped_question = escape_markdown(q["question"], version=2)
+        escaped_username = escape_markdown(q["username"], version=2)
+        response += f"ID: `{q['id']}`, От: @{escaped_username}, Вопрос: *{escaped_question}*, Статус: `{status}`\n"
+    try:
+        await update.message.reply_text(response, parse_mode="MarkdownV2")
+        logger.info(f"Админ запросил список вопросов: {len(active_questions)} активных вопросов")
+    except Exception as e:
+        logger.error(f"Ошибка отправки списка вопросов: {e}")
+        await update.message.reply_text("Ошибка отправки списка вопросов! 😿 Попробуй ещё раз или проверь логи.", parse_mode="Markdown")
 
 async def my_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Команда /myquestions от user_id {update.effective_user.id}")
@@ -225,10 +231,16 @@ async def my_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     response = "*Твои активные вопросы*:\n"
     for q in user_questions:
         status = STATUS_TRANSLATIONS.get(q["status"], q["status"])
-        answer = f", Ответ: *{q['answer']}*" if q["status"] == "approved" and "answer" in q else ""
-        response += f"ID: `{q['id']}`, Вопрос: *{q['question']}*, Статус: `{status}`{answer}\n"
-    await update.message.reply_text(response, parse_mode="Markdown")
-    logger.info(f"Пользователь user_id {user_id} запросил свои вопросы: {len(user_questions)} активных вопросов")
+        escaped_question = escape_markdown(q["question"], version=2)
+        escaped_answer = escape_markdown(q["answer"], version=2) if q["status"] == "approved" and "answer" in q else ""
+        answer = f", Ответ: *{escaped_answer}*" if q["status"] == "approved" and "answer" in q else ""
+        response += f"ID: `{q['id']}`, Вопрос: *{escaped_question}*, Статус: `{status}`{answer}\n"
+    try:
+        await update.message.reply_text(response, parse_mode="MarkdownV2")
+        logger.info(f"Пользователь user_id {user_id} запросил свои вопросы: {len(user_questions)} активных вопросов")
+    except Exception as e:
+        logger.error(f"Ошибка отправки списка вопросов: {e}")
+        await update.message.reply_text("Ошибка отправки списка вопросов! 😿 Попробуй ещё раз или проверь логи.", parse_mode="Markdown")
 
 async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Команда /ask от user_id {update.effective_user.id}")
@@ -909,9 +921,15 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response = "*Твои активные вопросы*:\n"
         for q in user_questions:
             status = STATUS_TRANSLATIONS.get(q["status"], q["status"])
-            answer = f", Ответ: *{q['answer']}*" if q["status"] == "approved" and "answer" in q else ""
-            response += f"ID: `{q['id']}`, Вопрос: *{q['question']}*, Статус: `{status}`{answer}\n"
-        await query.message.reply_text(response, parse_mode="Markdown")
+            escaped_question = escape_markdown(q["question"], version=2)
+            escaped_answer = escape_markdown(q["answer"], version=2) if q["status"] == "approved" and "answer" in q else ""
+            answer = f", Ответ: *{escaped_answer}*" if q["status"] == "approved" and "answer" in q else ""
+            response += f"ID: `{q['id']}`, Вопрос: *{escaped_question}*, Статус: `{status}`{answer}\n"
+        try:
+            await query.message.reply_text(response, parse_mode="MarkdownV2")
+        except Exception as e:
+            logger.error(f"Ошибка отправки списка вопросов: {e}")
+            await query.message.reply_text("Ошибка отправки списка вопросов! 😿 Попробуй ещё раз или проверь логи.", parse_mode="Markdown")
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Ошибка: {context.error}")
