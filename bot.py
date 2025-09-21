@@ -109,7 +109,8 @@ def check_question_meaning(question: str) -> bool:
 def get_remaining_attempts(user_id: int, data: dict) -> int:
     """Возвращает количество оставшихся попыток для пользователя."""
     pending_questions = [q for q in data["questions"] if q["user_id"] == user_id and q["status"] == "pending" and not q.get("cancelled", False)]
-    return MAX_PENDING_QUESTIONS - len(pending_questions)
+    logger.info(f"Подсчёт попыток для user_id {user_id}: {len(pending_questions)} ожидающих вопросов")
+    return max(0, MAX_PENDING_QUESTIONS - len(pending_questions))
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Команда /start от user_id {update.effective_user.id}")
@@ -295,8 +296,16 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Проверка на осмысленность вопроса
     if not check_question_meaning(question):
+        try:
+            with open(QUESTIONS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            logger.error(f"Ошибка чтения {QUESTIONS_FILE}: {e}")
+            await update.message.reply_text("Ошибка записи вопроса! 😿 Свяжитесь с разработчиком.", parse_mode="Markdown")
+            return
+        remaining_attempts = get_remaining_attempts(user_id, data)
         await update.message.reply_text(
-            "Йоу, твой вопрос *кажется бессмысленным*! 😿 Попробуй задать что-то вроде: `Какую игру ты стримишь чаще всего?`",
+            f"Йоу, твой вопрос *кажется бессмысленным*! 😿 Попробуй задать что-то вроде: `Какую игру ты стримишь чаще всего?`\nОсталось попыток: *{remaining_attempts}*.",
             parse_mode="Markdown"
         )
         logger.info(f"Вопрос отклонён как бессмысленный от user_id {user_id}: {question}")
@@ -306,7 +315,18 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in spam_protection:
         last_ask_time = spam_protection[user_id]["last_ask_time"]
         if current_time - last_ask_time < 60:
-            await update.message.reply_text("Йоу, *не так быстро*! 😎 Один вопрос в минуту!", parse_mode="Markdown")
+            try:
+                with open(QUESTIONS_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except (json.JSONDecodeError, IOError) as e:
+                logger.error(f"Ошибка чтения {QUESTIONS_FILE}: {e}")
+                await update.message.reply_text("Ошибка записи вопроса! 😿 Свяжитесь с разработчиком.", parse_mode="Markdown")
+                return
+            remaining_attempts = get_remaining_attempts(user_id, data)
+            await update.message.reply_text(
+                f"Йоу, *не так быстро*! 😎 Один вопрос в минуту! Осталось попыток: *{remaining_attempts}*.",
+                parse_mode="Markdown"
+            )
             logger.info(f"Спам-атака от user_id {user_id}: слишком частые вопросы")
             return
 
@@ -390,7 +410,16 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     question_hashes[user_id].append(question_hash)
     spam_protection[user_id] = {"last_ask_time": current_time, "last_question": question}
 
-    remaining_attempts = get_remaining_attempts(user_id, data)
+    # Перечитываем файл после записи, чтобы убедиться в актуальности данных
+    try:
+        with open(QUESTIONS_FILE, "r", encoding="utf-8") as f:
+            updated_data = json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        logger.error(f"Ошибка перечтения {QUESTIONS_FILE} после записи: {e}")
+        await update.message.reply_text("Ошибка записи вопроса! 😿 Свяжитесь с разработчиком.", parse_mode="Markdown")
+        return
+
+    remaining_attempts = get_remaining_attempts(user_id, updated_data)
     keyboard = [[InlineKeyboardButton("Уведомить о результате 🔔", callback_data=f"notify_{question_id}")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(
