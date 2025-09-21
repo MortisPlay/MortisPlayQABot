@@ -5,10 +5,9 @@ import time
 import asyncio
 import hashlib
 import re
-import aiohttp
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.helpers import escape_markdown
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, filters, ContextTypes
 from dotenv import load_dotenv
 
 # Настройка логирования
@@ -25,11 +24,9 @@ logger = logging.getLogger(__name__)
 # Загрузка переменных окружения
 load_dotenv(".env")
 TOKEN = os.getenv("TELEGRAM_TOKEN")
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://your-railway-url.up.railway.app/api/update_questions")
 QUESTIONS_FILE = os.getenv("QUESTIONS_FILE", "questions.json")
-if not TOKEN or not WEBHOOK_SECRET or not WEBHOOK_URL:
-    raise ValueError("Не заданы TELEGRAM_TOKEN, WEBHOOK_SECRET или WEBHOOK_URL в .env файле!")
+if not TOKEN:
+    raise ValueError("Не задан TELEGRAM_TOKEN в .env файле!")
 
 # Константы
 ADMIN_ID = 335236137
@@ -58,19 +55,6 @@ if not os.path.exists(BLACKLIST_FILE):
 spam_protection = {}
 processed_updates = set()
 question_hashes = {}
-
-async def send_webhook(data):
-    """Отправка вебхука для обновления questions.json"""
-    async with aiohttp.ClientSession() as session:
-        try:
-            headers = {"Authorization": f"Bearer {WEBHOOK_SECRET}"}
-            async with session.post(WEBHOOK_URL, json=data, headers=headers) as response:
-                if response.status == 200:
-                    logger.info("Вебхук успешно отправлен")
-                else:
-                    logger.error(f"Ошибка вебхука: {response.status} - {await response.text()}")
-        except Exception as e:
-            logger.error(f"Ошибка отправки вебхука: {e}")
 
 def get_question_hash(question: str) -> str:
     return hashlib.md5(question.lower().encode('utf-8')).hexdigest()
@@ -463,7 +447,6 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        await send_webhook(data)  # Отправляем вебхук
     except IOError as e:
         logger.error(f"Ошибка записи в {QUESTIONS_FILE}: {e}")
         await update.message.reply_text("Ошибка записи вопроса! 😿 Свяжитесь с разработчиком.", parse_mode="Markdown")
@@ -537,7 +520,6 @@ async def notify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        await send_webhook(data)  # Отправляем вебхук
     except IOError as e:
         logger.error(f"Ошибка записи в {QUESTIONS_FILE}: {e}")
         await query.message.reply_text("Ошибка обработки уведомления! 😿 Свяжитесь с разработчиком.", parse_mode="Markdown")
@@ -630,7 +612,6 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-            await send_webhook(data)  # Отправляем вебхук
         except IOError as e:
             logger.error(f"Ошибка записи в {QUESTIONS_FILE}: {e}")
             await update.message.reply_text("Ошибка записи ответа! 😿 Свяжитесь с разработчиком.", parse_mode="Markdown")
@@ -712,7 +693,6 @@ async def reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-            await send_webhook(data)  # Отправляем вебхук
         except IOError as e:
             logger.error(f"Ошибка записи в {QUESTIONS_FILE}: {e}")
             await update.message.reply_text("Ошибка записи статуса! 😿 Свяжитесь с разработчиком.", parse_mode="Markdown")
@@ -794,7 +774,6 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-            await send_webhook(data)  # Отправляем вебхук
         except IOError as e:
             logger.error(f"Ошибка записи в {QUESTIONS_FILE}: {e}")
             await update.message.reply_text("Ошибка записи статуса! 😿 Свяжитесь с разработчиком.", parse_mode="Markdown")
@@ -861,7 +840,6 @@ async def delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-            await send_webhook(data)  # Отправляем вебхук
         except IOError as e:
             logger.error(f"Ошибка записи в {QUESTIONS_FILE}: {e}")
             await update.message.reply_text("Ошибка удаления вопроса! 😿 Свяжитесь с разработчиком.", parse_mode="Markdown")
@@ -899,7 +877,6 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data = {"questions": []}
         with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        await send_webhook(data)  # Отправляем вебхук
     except IOError as e:
         logger.error(f"Ошибка записи в {QUESTIONS_FILE}: {e}")
         await update.message.reply_text("Ошибка очистки вопросов! 😿 Свяжитесь с разработчиком.", parse_mode="Markdown")
@@ -964,7 +941,6 @@ async def edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-            await send_webhook(data)  # Отправляем вебхук
         except IOError as e:
             logger.error(f"Ошибка записи в {QUESTIONS_FILE}: {e}")
             await update.message.reply_text("Ошибка записи вопроса! 😿 Свяжитесь с разработчиком.", parse_mode="Markdown")
@@ -1007,9 +983,8 @@ async def main_async():
         await app.start()
         await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
         logger.info("Бот успешно запущен в режиме polling")
-        await app.updater.stop()
-        await app.stop()
-        await app.shutdown()
+        while True:
+            await asyncio.sleep(3600)  # Держим бота активным
     except Exception as e:
         logger.error(f"Ошибка инициализации бота: {e}")
         raise
