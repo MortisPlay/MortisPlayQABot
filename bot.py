@@ -156,7 +156,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Команда /guide от user_id {update.effective_user.id}")
-    if not update.message or not update.message.text:
+    user_id = update.effective_user.id
+    reply_to = update.message or update.callback_query.message
+    if not reply_to or (update.message and not update.message.text):
         logger.info("Пропущено невалидное или удалённое сообщение")
         return
     update_id = update.update_id
@@ -165,13 +167,12 @@ async def guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     processed_updates.add(update_id)
 
-    user_id = update.message.from_user.id
     try:
         with open(QUESTIONS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
     except (json.JSONDecodeError, IOError) as e:
         logger.error(f"Ошибка чтения {QUESTIONS_FILE}: {e}")
-        await update.message.reply_text("🚨 Ошибка данных! Свяжитесь с @dimap7221.", parse_mode="Markdown")
+        await reply_to.reply_text("🚨 Ошибка данных! Свяжитесь с @dimap7221.", parse_mode="Markdown")
         return
 
     remaining_attempts = get_remaining_attempts(user_id, data)
@@ -181,7 +182,7 @@ async def guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("На сайт 🌐", url=QA_WEBSITE)]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
+    text = (
         f"📖 *Гайд для новичков*\n\n"
         f"Добро пожаловать в Q&A-бот Mortis Play! 😎\n\n"
         f"1️⃣ *Задай вопрос*: Пиши `/ask <вопрос>`, например: `/ask Какая твоя любимая игра?`\n"
@@ -191,11 +192,15 @@ async def guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"4️⃣ *Ответы на сайте*: Принятые вопросы публикуются на [сайте]({QA_WEBSITE}) за 1–48 часов.\n\n"
         f"5️⃣ *Вопрос не приняли?* Узнаешь, если включил уведомления. Пиши @dimap7221, если что-то не так.\n\n"
         f"6️⃣ *Лимит*: Пока 3 вопроса на рассмотрении, новые не добавишь.\n\n"
-        f"🚀 *Готов?* Жми кнопки или пиши `/ask`!",
-        reply_markup=reply_markup,
-        parse_mode="Markdown"
+        f"🚀 *Готов?* Жми кнопки или пиши `/ask`!"
     )
-    logger.info(f"Гайд отправлен пользователю user_id {user_id}")
+    try:
+        await reply_to.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        logger.info(f"Гайд отправлен пользователю user_id {user_id}")
+    except Exception as e:
+        logger.error(f"Ошибка отправки гайда: {e}")
+        text_plain = text.replace("*", "").replace("[сайте](https://mortisplay.ru/qa.html)", f"сайте {QA_WEBSITE}")
+        await reply_to.reply_text(text_plain, reply_markup=reply_markup, parse_mode=None)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Команда /help от user_id {update.effective_user.id}")
@@ -224,7 +229,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("Гайд 📖", callback_data="guide")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
+    text = (
         f"👋 *Привет!* Я Q&A-бот Mortis Play 😎\n"
         f"📌 *Осталось попыток*: {remaining_attempts}\n\n"
         f"📋 *Команды*:\n"
@@ -239,10 +244,14 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• `/edit <id> <вопрос>` — Редактировать вопрос (админ)\n"
         f"• `/cancel <id> <причина>` — Аннулировать вопрос (админ)\n\n"
         f"📢 Вопросы должны быть осмысленными. Похожие вопросы не засчитываются в лимит!\n"
-        f"Новичок? Жми *Гайд* или пиши `/guide`! 🚀",
-        reply_markup=reply_markup,
-        parse_mode="Markdown"
+        f"Новичок? Жми *Гайд* или пиши `/guide`! 🚀"
     )
+    try:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Ошибка отправки /help: {e}")
+        text_plain = text.replace("*", "").replace("[сайте](https://mortisplay.ru/qa.html)", f"сайте {QA_WEBSITE}")
+        await update.message.reply_text(text_plain, reply_markup=reply_markup, parse_mode=None)
 
 async def list_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Команда /list от user_id {update.effective_user.id}")
@@ -297,7 +306,9 @@ async def list_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def my_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Команда /myquestions от user_id {update.effective_user.id}")
-    if not update.message or not update.message.text:
+    user_id = update.effective_user.id
+    reply_to = update.message or update.callback_query.message
+    if not reply_to or (update.message and not update.message.text):
         logger.info("Пропущено невалидное или удалённое сообщение")
         return
     update_id = update.update_id
@@ -306,19 +317,18 @@ async def my_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     processed_updates.add(update_id)
 
-    user_id = update.message.from_user.id
     try:
         with open(QUESTIONS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
     except (json.JSONDecodeError, IOError) as e:
         logger.error(f"Ошибка чтения {QUESTIONS_FILE}: {e}")
-        await update.message.reply_text("🚨 Ошибка чтения вопросов! Свяжитесь с @dimap7221.", parse_mode="Markdown")
+        await reply_to.reply_text("🚨 Ошибка чтения вопросов! Свяжитесь с @dimap7221.", parse_mode="Markdown")
         return
 
     user_questions = [q for q in data["questions"] if q["user_id"] == user_id and not q.get("cancelled", False)]
     remaining_attempts = get_remaining_attempts(user_id, data)
     if not user_questions:
-        await update.message.reply_text(
+        await reply_to.reply_text(
             f"📭 *Ты не задал вопросов*! Осталось попыток: *{remaining_attempts}*.\n"
             f"Пиши `/ask <вопрос>` или жми `/guide`! 🚀",
             parse_mode="Markdown"
@@ -337,7 +347,7 @@ async def my_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     logger.info(f"Формируем список вопросов пользователя user_id {user_id}: {response}")
     try:
-        await update.message.reply_text(response, parse_mode="MarkdownV2")
+        await reply_to.reply_text(response, parse_mode="MarkdownV2")
         logger.info(f"Пользователь user_id {user_id} запросил свои вопросы: {len(user_questions)} активных вопросов")
     except Exception as e:
         logger.error(f"Ошибка отправки списка вопросов: {e}")
@@ -347,7 +357,7 @@ async def my_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
             answer = f"\nОтвет: {q['answer']}" if q["status"] == "approved" and "answer" in q else ""
             cancel_reason = f"\nПричина: {q['cancel_reason']}" if q.get("cancel_reason") and q["status"] == "cancelled" else ""
             plain_response += f"ID: {q['id']}\nВопрос: {q['question']}\nСтатус: {status}{answer}{cancel_reason}\n\n"
-        await update.message.reply_text(plain_response)
+        await reply_to.reply_text(plain_response)
         logger.info(f"Отправлен список вопросов в plain-text формате из-за ошибки MarkdownV2")
 
 async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -375,12 +385,17 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("🚨 Ошибка записи вопроса! Свяжитесь с @dimap7221.", parse_mode="Markdown")
             return
         remaining_attempts = get_remaining_attempts(user_id, data)
-        await update.message.reply_text(
+        text = (
             f"❓ Напиши вопрос после `/ask`, например: `/ask Какая твоя любимая игра?`\n"
             f"📌 Осталось попыток: *{remaining_attempts}*\n"
-            f"Смотри `/guide` для подсказок!",
-            parse_mode="Markdown"
+            f"Смотри `/guide` для подсказок!"
         )
+        try:
+            await update.message.reply_text(text, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Ошибка отправки ответа на /ask (пустой вопрос): {e}")
+            text_plain = text.replace("*", "")
+            await update.message.reply_text(text_plain, parse_mode=None)
         return
 
     if not check_question_meaning(question):
@@ -392,12 +407,17 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("🚨 Ошибка записи вопроса! Свяжитесь с @dimap7221.", parse_mode="Markdown")
             return
         remaining_attempts = get_remaining_attempts(user_id, data)
-        await update.message.reply_text(
+        text = (
             f"❌ Вопрос *бессмысленный*! 😿 Пример: `/ask Какая твоя любимая игра?`\n"
             f"📌 Осталось попыток: *{remaining_attempts}*\n"
-            f"Смотри `/guide` для подсказок!",
-            parse_mode="Markdown"
+            f"Смотри `/guide` для подсказок!"
         )
+        try:
+            await update.message.reply_text(text, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Ошибка отправки ответа на /ask (бессмысленный): {e}")
+            text_plain = text.replace("*", "")
+            await update.message.reply_text(text_plain, parse_mode=None)
         logger.info(f"Вопрос отклонён как бессмысленный от user_id {user_id}: {question}")
         return
 
@@ -413,12 +433,17 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("🚨 Ошибка записи вопроса! Свяжитесь с @dimap7221.", parse_mode="Markdown")
                 return
             remaining_attempts = get_remaining_attempts(user_id, data)
-            await update.message.reply_text(
+            text = (
                 f"⏳ *Не так быстро!* Один вопрос в минуту.\n"
                 f"📌 Осталось попыток: *{remaining_attempts}*\n"
-                f"Смотри `/guide` для подсказок!",
-                parse_mode="Markdown"
+                f"Смотри `/guide` для подсказок!"
             )
+            try:
+                await update.message.reply_text(text, parse_mode="Markdown")
+            except Exception as e:
+                logger.error(f"Ошибка отправки ответа на /ask (спам): {e}")
+                text_plain = text.replace("*", "")
+                await update.message.reply_text(text_plain, parse_mode=None)
             logger.info(f"Спам-атака от user_id {user_id}: слишком частые вопросы")
             return
 
@@ -433,12 +458,17 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Проверка на точный дубликат
     if question_hash in question_hashes.get(user_id, []):
         remaining_attempts = get_remaining_attempts(user_id, data)
-        await update.message.reply_text(
+        text = (
             f"🔁 *Этот вопрос уже задан!* Попробуй другой.\n"
             f"📌 Осталось попыток: *{remaining_attempts}*\n"
-            f"Смотри `/guide` для подсказок!",
-            parse_mode="Markdown"
+            f"Смотри `/guide` для подсказок!"
         )
+        try:
+            await update.message.reply_text(text, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Ошибка отправки ответа на /ask (дубликат): {e}")
+            text_plain = text.replace("*", "")
+            await update.message.reply_text(text_plain, parse_mode=None)
         logger.info(f"Дубликат вопроса от user_id {user_id}: {question}")
         return
 
@@ -447,44 +477,64 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_similar:
         remaining_attempts = get_remaining_attempts(user_id, data)
         escaped_similar = custom_escape_markdown(similar_question)
-        await update.message.reply_text(
+        text = (
             f"⚠️ *Похожий вопрос уже задан*: *{escaped_similar}*\n"
             f"Попробуй другой или уточни. 📌 Осталось попыток: *{remaining_attempts}*\n"
-            f"Смотри `/guide` для подсказок!",
-            parse_mode="MarkdownV2"
+            f"Смотри `/guide` для подсказок!"
         )
+        try:
+            await update.message.reply_text(text, parse_mode="MarkdownV2")
+        except Exception as e:
+            logger.error(f"Ошибка отправки ответа на /ask (похожий): {e}")
+            text_plain = text.replace("*", "").replace(f"*{escaped_similar}*", similar_question)
+            await update.message.reply_text(text_plain, parse_mode=None)
         logger.info(f"Похожий вопрос от user_id {user_id}: {question} ~ {similar_question}")
         return
 
     pending_questions = [q for q in data["questions"] if q["user_id"] == user_id and q["status"] == "pending" and not q.get("cancelled", False)]
     if len(pending_questions) >= MAX_PENDING_QUESTIONS:
-        await update.message.reply_text(
+        text = (
             f"⚠️ *Лимит {MAX_PENDING_QUESTIONS} вопроса!* Дождись ответа.\n"
-            f"Смотри `/guide` для подсказок!",
-            parse_mode="Markdown"
+            f"Смотри `/guide` для подсказок!"
         )
+        try:
+            await update.message.reply_text(text, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Ошибка отправки ответа на /ask (лимит): {e}")
+            text_plain = text.replace("*", "")
+            await update.message.reply_text(text_plain, parse_mode=None)
         logger.info(f"Превышен лимит ожидающих вопросов для user_id {user_id}: {len(pending_questions)}")
         return
 
     if len(question) < 5 or len(question) > 500:
         remaining_attempts = get_remaining_attempts(user_id, data)
-        await update.message.reply_text(
+        text = (
             f"📏 Вопрос должен быть 5–500 символов!\n"
             f"📌 Осталось попыток: *{remaining_attempts}*\n"
-            f"Смотри `/guide` для подсказок!",
-            parse_mode="Markdown"
+            f"Смотри `/guide` для подсказок!"
         )
+        try:
+            await update.message.reply_text(text, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Ошибка отправки ответа на /ask (длина): {e}")
+            text_plain = text.replace("*", "")
+            await update.message.reply_text(text_plain, parse_mode=None)
         logger.info(f"Недопустимая длина вопроса от user_id {user_id}: {len(question)} символов")
         return
 
     if check_blacklist(question):
         remaining_attempts = get_remaining_attempts(user_id, data)
-        await update.message.reply_text(
+        text = (
             f"🚫 Вопрос содержит *запрещённые слова*! Попробуй другой.\n"
             f"📌 Осталось попыток: *{remaining_attempts}*\n"
-            f"Смотри `/guide` для подсказок!",
-            parse_mode="Markdown"
+            f"Смотри `/guide` для подсказок!"
         )
+        try:
+            await update.message.reply_text(text, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Ошибка отправки ответа на /ask (чёрный список): {e}")
+            text_plain = text.replace("*", "")
+            await update.message.reply_text(text_plain, parse_mode=None)
         logger.info(f"Вопрос отклонён из-за чёрного списка: {question}")
         return
 
@@ -503,7 +553,6 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        # Проверка записи
         with open(QUESTIONS_FILE, "r", encoding="utf-8") as f:
             updated_data = json.load(f)
         if not any(q["id"] == question_id for q in updated_data["questions"]):
@@ -521,14 +570,19 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     remaining_attempts = get_remaining_attempts(user_id, updated_data)
     keyboard = [[InlineKeyboardButton("Уведомить 🔔", callback_data=f"notify_{question_id}")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
+    text = (
         f"✅ *Вопрос принят!* 😸 Жди ответа на [сайте]({QA_WEBSITE}) (1–48 часов).\n"
         f"📌 Осталось попыток: *{remaining_attempts}*\n"
         f"Не на сайте? Пиши @dimap7221!\n"
-        f"Подробности: `/guide`",
-        reply_markup=reply_markup,
-        parse_mode="Markdown"
+        f"Подробности: `/guide`"
     )
+    try:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        logger.info(f"Вопрос принят от user_id {user_id}: ID {question_id}")
+    except Exception as e:
+        logger.error(f"Ошибка отправки ответа на /ask (успех): {e}")
+        text_plain = text.replace("*", "").replace("[сайте](https://mortisplay.ru/qa.html)", f"сайте {QA_WEBSITE}")
+        await update.message.reply_text(text_plain, reply_markup=reply_markup, parse_mode=None)
 
     escaped_question = custom_escape_markdown(question)
     escaped_username = custom_escape_markdown(user.username or "Аноним")
@@ -564,11 +618,17 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     callback_data = query.data
     logger.info(f"Callback {callback_data} от user_id {user_id}")
 
-    if callback_data == "notify":
-        question_id = int(query.data.split("_")[1])
+    if callback_data.startswith("notify_"):
         try:
-            with open(QUESTIONS_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            question_id = int(callback_data.split("_")[1])
+            try:
+                with open(QUESTIONS_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except (json.JSONDecodeError, IOError) as e:
+                logger.error(f"Ошибка чтения {QUESTIONS_FILE}: {e}")
+                await query.message.reply_text("🚨 Ошибка уведомления! Свяжитесь с @dimap7221.", parse_mode="Markdown")
+                return
+
             for q in data["questions"]:
                 if q["id"] == question_id and q["user_id"] == user_id and not q.get("cancelled", False):
                     q["notify"] = True
@@ -593,7 +653,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             logger.info(f"Пользователь user_id {user_id} включил уведомления для вопроса ID {question_id}")
         except ValueError:
-            logger.error(f"Ошибка обработки notify callback: неверный формат question_id {query.data}")
+            logger.error(f"Ошибка обработки notify callback: неверный формат question_id {callback_data}")
             await query.message.reply_text("🚨 Ошибка уведомления! Свяжитесь с @dimap7221.", parse_mode="Markdown")
 
     elif callback_data == "ask":
@@ -605,9 +665,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Пользователь user_id {user_id} нажал кнопку 'Задать вопрос'")
 
     elif callback_data == "myquestions":
+        update.message = query.message  # Передаём message для my_questions
         await my_questions(update, context)
 
     elif callback_data == "guide":
+        update.message = query.message  # Передаём message для guide
         await guide(update, context)
 
 async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
