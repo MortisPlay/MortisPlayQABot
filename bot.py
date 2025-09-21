@@ -106,6 +106,13 @@ def check_question_meaning(question: str) -> bool:
     
     return True
 
+def custom_escape_markdown(text: str) -> str:
+    """Экранирование специальных символов для MarkdownV2, включая круглые скобки."""
+    text = escape_markdown(text, version=2)
+    # Дополнительно экранируем круглые скобки
+    text = text.replace('(', r'\(').replace(')', r'\)')
+    return text
+
 def get_remaining_attempts(user_id: int, data: dict) -> int:
     """Возвращает количество оставшихся попыток для пользователя."""
     pending_questions = [q for q in data["questions"] if q["user_id"] == user_id and q["status"] == "pending" and not q.get("cancelled", False)]
@@ -223,10 +230,12 @@ async def list_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     response = "*Список активных вопросов*:\n"
     for q in active_questions:
         status = STATUS_TRANSLATIONS.get(q["status"], q["status"])
-        escaped_question = escape_markdown(q["question"], version=2)
-        escaped_username = escape_markdown(q["username"], version=2)
-        cancel_reason = f", Причина: *{escape_markdown(q['cancel_reason'], version=2)}*" if q.get("cancel_reason") and q["status"] == "cancelled" else ""
+        escaped_question = custom_escape_markdown(q["question"])
+        escaped_username = custom_escape_markdown(q["username"])
+        cancel_reason = f", Причина: *{custom_escape_markdown(q['cancel_reason'])}*" if q.get("cancel_reason") and q["status"] == "cancelled" else ""
         response += f"ID: `{q['id']}`, От: @{escaped_username}, Вопрос: *{escaped_question}*, Статус: `{status}`{cancel_reason}\n"
+    
+    logger.info(f"Формируем список вопросов для отправки: {response}")
     try:
         await update.message.reply_text(response, parse_mode="MarkdownV2")
         logger.info(f"Админ запросил список вопросов: {len(active_questions)} активных вопросов")
@@ -266,11 +275,13 @@ async def my_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     response = f"*Твои активные вопросы* (осталось попыток: *{remaining_attempts}*):\n"
     for q in user_questions:
         status = STATUS_TRANSLATIONS.get(q["status"], q["status"])
-        escaped_question = escape_markdown(q["question"], version=2)
-        escaped_answer = escape_markdown(q["answer"], version=2) if q["status"] == "approved" and "answer" in q else ""
+        escaped_question = custom_escape_markdown(q["question"])
+        escaped_answer = custom_escape_markdown(q["answer"]) if q["status"] == "approved" and "answer" in q else ""
         answer = f", Ответ: *{escaped_answer}*" if q["status"] == "approved" and "answer" in q else ""
-        cancel_reason = f", Причина: *{escape_markdown(q['cancel_reason'], version=2)}*" if q.get("cancel_reason") and q["status"] == "cancelled" else ""
+        cancel_reason = f", Причина: *{custom_escape_markdown(q['cancel_reason'])}*" if q.get("cancel_reason") and q["status"] == "cancelled" else ""
         response += f"ID: `{q['id']}`, Вопрос: *{escaped_question}*, Статус: `{status}`{answer}{cancel_reason}\n"
+    
+    logger.info(f"Формируем список вопросов пользователя user_id {user_id}: {response}")
     try:
         await update.message.reply_text(response, parse_mode="MarkdownV2")
         logger.info(f"Пользователь user_id {user_id} запросил свои вопросы: {len(user_questions)} активных вопросов")
@@ -430,8 +441,8 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
-    escaped_question = escape_markdown(question, version=2)
-    escaped_username = escape_markdown(user.username or "Аноним", version=2)
+    escaped_question = custom_escape_markdown(question)
+    escaped_username = custom_escape_markdown(user.username or "Аноним")
     try:
         await context.bot.send_message(
             chat_id=ADMIN_ID,
@@ -538,7 +549,7 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup = InlineKeyboardMarkup(website_button)
                 if q["notify"]:
                     try:
-                        escaped_answer = escape_markdown(answer, version=2)
+                        escaped_answer = custom_escape_markdown(answer)
                         await context.bot.send_message(
                             chat_id=q["user_id"],
                             text=f"*Твой вопрос принят!* 😎 Ответ: *{escaped_answer}*\nСмотри на сайте!",
@@ -716,7 +727,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 q["cancel_reason"] = cancel_reason
                 if q["notify"]:
                     try:
-                        escaped_reason = escape_markdown(cancel_reason, version=2)
+                        escaped_reason = custom_escape_markdown(cancel_reason)
                         await context.bot.send_message(
                             chat_id=q["user_id"],
                             text=f"Твой вопрос *аннулирован* 😕 Причина: *{escaped_reason}*\nСвяжитесь с админом (@dimap7221) для уточнений!",
@@ -747,7 +758,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Ошибка аннулирования вопроса! 😿 Свяжитесь с разработчиком.", parse_mode="Markdown")
             return
 
-        escaped_reason = escape_markdown(cancel_reason, version=2)
+        escaped_reason = custom_escape_markdown(cancel_reason)
         await update.message.reply_text(
             f"Вопрос `{question_id}` *аннулирован* 😿 Причина: *{escaped_reason}*",
             parse_mode="MarkdownV2"
@@ -1032,11 +1043,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response = f"*Твои активные вопросы* (осталось попыток: *{remaining_attempts}*):\n"
         for q in user_questions:
             status = STATUS_TRANSLATIONS.get(q["status"], q["status"])
-            escaped_question = escape_markdown(q["question"], version=2)
-            escaped_answer = escape_markdown(q["answer"], version=2) if q["status"] == "approved" and "answer" in q else ""
+            escaped_question = custom_escape_markdown(q["question"])
+            escaped_answer = custom_escape_markdown(q["answer"]) if q["status"] == "approved" and "answer" in q else ""
             answer = f", Ответ: *{escaped_answer}*" if q["status"] == "approved" and "answer" in q else ""
-            cancel_reason = f", Причина: *{escape_markdown(q['cancel_reason'], version=2)}*" if q.get("cancel_reason") and q["status"] == "cancelled" else ""
+            cancel_reason = f", Причина: *{custom_escape_markdown(q['cancel_reason'])}*" if q.get("cancel_reason") and q["status"] == "cancelled" else ""
             response += f"ID: `{q['id']}`, Вопрос: *{escaped_question}*, Статус: `{status}`{answer}{cancel_reason}\n"
+        
+        logger.info(f"Формируем список вопросов для callback user_id {user_id}: {response}")
         try:
             await query.message.reply_text(response, parse_mode="MarkdownV2")
         except Exception as e:
