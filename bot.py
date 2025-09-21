@@ -356,7 +356,7 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
         logger.info(f"Превышен лимит ожидающих вопросов для user_id {user_id}: {len(pending_questions)}")
-        return
+        return  # Прерываем выполнение, чтобы не добавить вопрос сверх лимита
 
     if not context.args and update.message.text.startswith("/ask"):
         remaining_attempts = get_remaining_attempts(user_id, data)
