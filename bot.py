@@ -158,8 +158,8 @@ async def guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Команда /guide от user_id {update.effective_user.id}")
     user_id = update.effective_user.id
     reply_to = update.message or update.callback_query.message
-    if not reply_to or (update.message and not update.message.text):
-        logger.info("Пропущено невалидное или удалённое сообщение")
+    if not reply_to:
+        logger.info("Отсутствует reply_to (update.message или update.callback_query.message)")
         return
     update_id = update.update_id
     if update_id in processed_updates:
@@ -308,8 +308,8 @@ async def my_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Команда /myquestions от user_id {update.effective_user.id}")
     user_id = update.effective_user.id
     reply_to = update.message or update.callback_query.message
-    if not reply_to or (update.message and not update.message.text):
-        logger.info("Пропущено невалидное или удалённое сообщение")
+    if not reply_to:
+        logger.info("Отсутствует reply_to (update.message или update.callback_query.message)")
         return
     update_id = update.update_id
     if update_id in processed_updates:
@@ -618,6 +618,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     callback_data = query.data
     logger.info(f"Callback {callback_data} от user_id {user_id}")
 
+    if not query.message:
+        logger.error(f"Ошибка: query.message отсутствует для callback_data {callback_data}")
+        await query.message.reply_text("🚨 Ошибка обработки кнопки! Свяжитесь с @dimap7221.", parse_mode="Markdown")
+        return
+
     if callback_data.startswith("notify_"):
         try:
             question_id = int(callback_data.split("_")[1])
@@ -665,12 +670,86 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Пользователь user_id {user_id} нажал кнопку 'Задать вопрос'")
 
     elif callback_data == "myquestions":
-        update.message = query.message  # Передаём message для my_questions
-        await my_questions(update, context)
+        logger.info(f"Обработка callback 'myquestions' для user_id {user_id}")
+        try:
+            with open(QUESTIONS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            logger.error(f"Ошибка чтения {QUESTIONS_FILE}: {e}")
+            await query.message.reply_text("🚨 Ошибка чтения вопросов! Свяжитесь с @dimap7221.", parse_mode="Markdown")
+            return
+
+        user_questions = [q for q in data["questions"] if q["user_id"] == user_id and not q.get("cancelled", False)]
+        remaining_attempts = get_remaining_attempts(user_id, data)
+        if not user_questions:
+            await query.message.reply_text(
+                f"📭 *Ты не задал вопросов*! Осталось попыток: *{remaining_attempts}*.\n"
+                f"Пиши `/ask <вопрос>` или жми `/guide`! 🚀",
+                parse_mode="Markdown"
+            )
+            logger.info(f"Пользователь user_id {user_id} запросил свои вопросы: список активных вопросов пуст")
+            return
+
+        response = f"*📋 Твои вопросы* (попыток: *{remaining_attempts}*):\n\n"
+        for q in user_questions:
+            status = STATUS_TRANSLATIONS.get(q["status"], q["status"])
+            escaped_question = custom_escape_markdown(q["question"])
+            escaped_answer = custom_escape_markdown(q["answer"]) if q["status"] == "approved" and "answer" in q else ""
+            answer = f"\n**Ответ**: *{escaped_answer}*" if q["status"] == "approved" and "answer" in q else ""
+            cancel_reason = f"\n**Причина**: *{custom_escape_markdown(q['cancel_reason'])}*" if q.get("cancel_reason") and q["status"] == "cancelled" else ""
+            response += f"**ID**: `{q['id']}`\n**Вопрос**: *{escaped_question}*\n**Статус**: `{status}`{answer}{cancel_reason}\n\n"
+
+        logger.info(f"Формируем список вопросов пользователя user_id {user_id}: {response}")
+        try:
+            await query.message.reply_text(response, parse_mode="MarkdownV2")
+            logger.info(f"Пользователь user_id {user_id} запросил свои вопросы: {len(user_questions)} активных вопросов")
+        except Exception as e:
+            logger.error(f"Ошибка отправки списка вопросов: {e}")
+            plain_response = f"📋 Твои вопросы (попыток: {remaining_attempts}):\n\n"
+            for q in user_questions:
+                status = STATUS_TRANSLATIONS.get(q["status"], q["status"])
+                answer = f"\nОтвет: {q['answer']}" if q["status"] == "approved" and "answer" in q else ""
+                cancel_reason = f"\nПричина: {q['cancel_reason']}" if q.get("cancel_reason") and q["status"] == "cancelled" else ""
+                plain_response += f"ID: {q['id']}\nВопрос: {q['question']}\nСтатус: {status}{answer}{cancel_reason}\n\n"
+            await query.message.reply_text(plain_response)
+            logger.info(f"Отправлен список вопросов в plain-text формате из-за ошибки MarkdownV2")
 
     elif callback_data == "guide":
-        update.message = query.message  # Передаём message для guide
-        await guide(update, context)
+        logger.info(f"Обработка callback 'guide' для user_id {user_id}")
+        try:
+            with open(QUESTIONS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            logger.error(f"Ошибка чтения {QUESTIONS_FILE}: {e}")
+            await query.message.reply_text("🚨 Ошибка данных! Свяжитесь с @dimap7221.", parse_mode="Markdown")
+            return
+
+        remaining_attempts = get_remaining_attempts(user_id, data)
+        keyboard = [
+            [InlineKeyboardButton("Задать вопрос ❓", callback_data="ask")],
+            [InlineKeyboardButton("Мои вопросы 📋", callback_data="myquestions")],
+            [InlineKeyboardButton("На сайт 🌐", url=QA_WEBSITE)]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        text = (
+            f"📖 *Гайд для новичков*\n\n"
+            f"Добро пожаловать в Q&A-бот Mortis Play! 😎\n\n"
+            f"1️⃣ *Задай вопрос*: Пиши `/ask <вопрос>`, например: `/ask Какая твоя любимая игра?`\n"
+            f"   Вопрос: 5–500 символов, осмысленный. *Осталось попыток*: {remaining_attempts} (макс. 3).\n\n"
+            f"2️⃣ *Уведомления*: Нажми *Уведомить 🔔* после вопроса, чтобы узнать статус.\n\n"
+            f"3️⃣ *Проверь вопросы*: Пиши `/myquestions` или жми *Мои вопросы*.\n\n"
+            f"4️⃣ *Ответы на сайте*: Принятые вопросы публикуются на [сайте]({QA_WEBSITE}) за 1–48 часов.\n\n"
+            f"5️⃣ *Вопрос не приняли?* Узнаешь, если включил уведомления. Пиши @dimap7221, если что-то не так.\n\n"
+            f"6️⃣ *Лимит*: Пока 3 вопроса на рассмотрении, новые не добавишь.\n\n"
+            f"🚀 *Готов?* Жми кнопки или пиши `/ask`!"
+        )
+        try:
+            await query.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+            logger.info(f"Гайд отправлен пользователю user_id {user_id}")
+        except Exception as e:
+            logger.error(f"Ошибка отправки гайда: {e}")
+            text_plain = text.replace("*", "").replace("[сайте](https://mortisplay.ru/qa.html)", f"сайте {QA_WEBSITE}")
+            await query.message.reply_text(text_plain, reply_markup=reply_markup, parse_mode=None)
 
 async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Команда /approve от user_id {update.effective_user.id}")
