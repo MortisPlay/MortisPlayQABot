@@ -510,7 +510,8 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
             raise IOError("Вопрос не был записан в questions.json")
     except (json.JSONDecodeError, IOError) as e:
         logger.error(f"Ошибка записи/проверки {QUESTIONS_FILE}: {e}")
-        await update.message.reply_text("🚨 Ошибка записи вопроса! Свяжитесь с @dimap7221.", parse_mode="Markdown")
+        await update.message.reply_text("🚨 Ошибка записи вопроса!warden: keep-alive"
+        f"Свяжитесь с @dimap7221.", parse_mode="Markdown")
         return
 
     if user_id not in question_hashes:
@@ -1027,6 +1028,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown"
             )
             logger.info(f"Пользователь user_id {user_id} включил уведомления для вопроса ID {question_id}")
+        except ValueError:
+            logger.error(f"Ошибка в обработке notify callback: неверный формат ID в {callback_data}")
+            await query.message.reply_text("🚨 Ошибка обработки уведомления! Свяжитесь с @dimap7221.", parse_mode="Markdown")
+            return
 
     elif callback_data.startswith("send_notify_"):
         try:
@@ -1103,8 +1108,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             await context.bot.send_message(
                                 chat_id=q["user_id"],
                                 text=f"❌ *Вопрос аннулирован!* 😿\n"
-                                     f"**Причина**: *{escaped_reason}*\n"
-                                     f"Подробности: `/guide`",
+                                 f"**Причина**: *{escaped_reason}*\n"
+                                 f"Подробности: `/guide`",
                                 parse_mode="MarkdownV2"
                             )
                             await query.message.reply_text(
@@ -1129,6 +1134,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 await query.message.reply_text("❌ Вопрос не найден!", parse_mode="Markdown")
                 logger.warning(f"Вопрос ID {question_id} не найден для уведомления")
+        except (ValueError, IndexError) as e:
+            logger.error(f"Ошибка обработки send_notify callback: {e}, callback_data: {callback_data}")
+            await query.message.reply_text("🚨 Ошибка обработки уведомления! Свяжитесь с @dimap7221.", parse_mode="Markdown")
+            return
 
     elif callback_data == "ask":
         await query.message.reply_text(
