@@ -93,7 +93,7 @@ def check_question_meaning(question: str) -> tuple[bool, str]:
     context_keywords = ["игра", "стрим", "видео", "mortis", "mortisplay", "канал", "youtube", "twitch"]
     has_context = any(keyword in question_lower for keyword in context_keywords) or len(words) >= 5
     if not has_context:
-        return False, "Вопрос не содержит контекста (например, про игры, стримы или Mortis Play)."
+        return False, "Вопрос не содержит контекста (например, про игры, стримы или что то связанное с Mortis Play)."
     return True, ""
 
 def check_question_similarity(new_question: str, existing_questions: list) -> tuple[bool, str]:
