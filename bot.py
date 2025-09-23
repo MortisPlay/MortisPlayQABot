@@ -699,16 +699,31 @@ async def my_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await check_update(update, context, callback)
 
 async def main_async():
-    app = Application.builder().token(TOKEN).build()
-    app.add_handler(CommandHandler("guide", guide))
-    app.add_handler(CommandHandler("ask", ask))
-    app.add_handler(CommandHandler("myquestions", my_questions))
-    app.add_handler(CommandHandler("approve", approve))
-    app.add_handler(CommandHandler("reject", reject))
-    app.add_handler(CommandHandler("cancel", cancel))
-    app.add_handler(CallbackQueryHandler(button_callback))
-    logger.info("Бот запущен")
-    await app.run_polling()
+    try:
+        app = Application.builder().token(TOKEN).build()
+        app.add_handler(CommandHandler("guide", guide))
+        app.add_handler(CommandHandler("ask", ask))
+        app.add_handler(CommandHandler("myquestions", my_questions))
+        app.add_handler(CommandHandler("approve", approve))
+        app.add_handler(CommandHandler("reject", reject))
+        app.add_handler(CommandHandler("cancel", cancel))
+        app.add_handler(CallbackQueryHandler(button_callback))
+        logger.info("Бот запущен")
+        await app.initialize()
+        await app.run_polling()
+        await app.shutdown()
+    except Exception as e:
+        logger.error(f"Ошибка запуска бота: {e}")
+        raise
 
 if __name__ == "__main__":
-    asyncio.run(main_async())
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            logger.info("Цикл событий уже запущен, используем существующий")
+            loop.create_task(main_async())
+        else:
+            loop.run_until_complete(main_async())
+    except RuntimeError as e:
+        logger.error(f"Ошибка цикла событий: {e}")
+        raise
