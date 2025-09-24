@@ -34,7 +34,7 @@ ADMIN_ID = 335236137
 BLACKLIST_FILE = "blacklist.json"
 QA_WEBSITE = "https://mortisplay.ru/qa.html"
 MAX_PENDING_QUESTIONS = 3
-SIMILARITY_THRESHOLD = 0.8
+SIMILARITY_THRESHOLD = 0.6  # Снижено с 0.8 до 0.6
 
 # Перевод статусов
 STATUS_TRANSLATIONS = {
@@ -78,6 +78,11 @@ def check_blacklist(question: str) -> bool:
 
 def check_question_meaning(question: str) -> tuple[bool, str]:
     question_lower = question.lower().strip()
+    # Проверка на вопросы о боте
+    bot_keywords = ["бот", "telegram", "телега", "телеграм", "bot"]
+    if any(keyword in question_lower for keyword in bot_keywords):
+        logger.info(f"Вопрос отклонён: содержит упоминание бота ({question})")
+        return False, "Вопросы о боте запрещены. Задайте вопрос о контенте Mortis Play!"
     if len(question_lower) < 10:
         return False, "Вопрос слишком короткий (менее 10 символов)."
     if re.match(r'^(.)\1{4,}$', question_lower.replace(' ', '')) or re.match(r'^(\W)\1{4,}$', question_lower):
@@ -90,10 +95,6 @@ def check_question_meaning(question: str) -> tuple[bool, str]:
     has_multiple_words = len(words) >= 3
     if not (has_question_word and has_multiple_words):
         return False, "Вопрос не содержит вопросительных слов или слишком прост."
-    context_keywords = ["игра", "стрим", "видео", "mortis", "mortisplay", "канал", "youtube", "twitch"]
-    has_context = any(keyword in question_lower for keyword in context_keywords) or len(words) >= 5
-    if not has_context:
-        return False, "Вопрос не содержит контекста (например, про игры, стримы или что то связанное с Mortis Play)."
     return True, ""
 
 def check_question_similarity(new_question: str, existing_questions: list) -> tuple[bool, str]:
@@ -178,29 +179,30 @@ async def guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     text = (
         f"📖 *Гайд по Q&A-боту Mortis Play*\n\n"
-        f"😎 Добро пожаловать! Вот как работает бот:\n\n"
-        f"1️⃣ *Задай вопрос*: Пиши `/ask <вопрос>` (5–500 символов, про игры/стримы/Mortis Play).\n"
-        f"   *Попыток*: {remaining_attempts}/3. Пример: `/ask Какая твоя любимая игра?`\n\n"
-        f"2️⃣ *Статусы вопроса*:\n"
+        f"😎 *Добро пожаловать!* Вот как работает бот:\n\n"
+        f"1️⃣ **Задай вопрос**: Пиши `/ask <вопрос>` (5–500 символов).\n"
+        f"   *Попыток*: {remaining_attempts}/3. Пример: `/ask Какая твоя любимая игра?`\n"
+        f"   *Совет*: _Чтобы ваш вопрос приняли быстро, добавьте контекст к вашему вопросу — так он быстрее попадёт на сайт!_\n\n"
+        f"2️⃣ **Статусы вопроса**:\n"
         f"   • *Рассматривается*: Ждёт проверки админом.\n"
-        f"   • *Принят*: Опубликован на [сайте]({QA_WEBSITE}) за 1–48ч.\n"
+        f"   • *Принят*: Опубликован на [сайте]({QA_WEBSITE}) за 1–48 ч.\n"
         f"   • *Отклонён*: Не подходит (с причиной).\n"
         f"   • *Аннулирован*: Удалён за нарушение правил.\n\n"
-        f"3️⃣ *Правила вопросов*:\n"
-        f"   • Вопросы должны быть связаны с Mortis Play (игры, стримы, контент).\n"
-        f"   • Запрещены: спам, оскорбления, реклама, оффтоп, личная информация.\n"
+        f"3️⃣ **Правила вопросов**:\n"
+        f"   • Вопросы должны быть связаны с контентом Mortis Play (игры, стримы, контент).\n"
+        f"   • Запрещены: спам, оскорбления, реклама, оффтоп, личная информация, вопросы о боте.\n"
         f"   • Аннулирование: за нарушение правил или неуместный контент.\n\n"
-        f"4️⃣ *Уведомления*: Нажми *Уведомить 🔔* для статуса вопроса.\n\n"
-        f"5️⃣ *Проверь вопросы*: Пиши `/myquestions`.\n\n"
-        f"📌 Проблемы? Пиши @dimap7221.\n"
-        f"🚀 Готов? Жми `/ask`!"
+        f"4️⃣ **Уведомления**: Нажми *Уведомить 🔔* для статуса вопроса.\n\n"
+        f"5️⃣ **Проверь вопросы**: Пиши `/myquestions`.\n\n"
+        f"📌 *Проблемы?* Пиши админу @dimap7221.\n"
+        f"🚀 *Готов?* Жми `/ask`!"
     )
     try:
         await reply_to.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
         logger.info(f"Гайд отправлен пользователю user_id {user_id}")
     except Exception as e:
         logger.error(f"Ошибка отправки гайда: {e}")
-        text_plain = text.replace("*", "").replace("[сайте](https://mortisplay.ru/qa.html)", f"сайте {QA_WEBSITE}")
+        text_plain = text.replace("*", "").replace("_", "").replace("[сайте](https://mortisplay.ru/qa.html)", f"сайте {QA_WEBSITE}")
         await reply_to.reply_text(text_plain, reply_markup=reply_markup, parse_mode=None)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -246,7 +248,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• `/cancel <id> <причина>` — Аннулировать вопрос (админ)\n"
         f"• `/approve <id> <ответ>` — Принять вопрос (админ)\n"
         f"• `/reject <id> <причина>` — Отклонить вопрос (админ)\n\n"
-        f"📢 Вопросы должны быть осмысленными и содержать контекст. Похожие вопросы не засчитываются в лимит!\n"
+        f"📢 Вопросы должны быть осмысленными и связанными с контентом Mortis Play. Запрещены вопросы о боте!\n"
         f"Новичок? Жми *Гайд* или пиши `/guide`! 🚀"
     )
     try:
@@ -391,7 +393,7 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         remaining_attempts = get_remaining_attempts(user_id, data)
         await update.message.reply_text(
-            f"❓ Напиши `/ask <вопрос>`, например: `/ask Какая твоя любимая игра на стримах?`\n"
+            f"❓ Напиши `/ask <вопрос>`, например: `/ask Какая твоя любимая игра?`\n"
             f"📌 *Попыток*: {remaining_attempts}/3",
             parse_mode="Markdown"
         )
@@ -510,8 +512,7 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
             raise IOError("Вопрос не был записан в questions.json")
     except (json.JSONDecodeError, IOError) as e:
         logger.error(f"Ошибка записи/проверки {QUESTIONS_FILE}: {e}")
-        await update.message.reply_text("🚨 Ошибка записи вопроса!warden: keep-alive"
-        f"Свяжитесь с @dimap7221.", parse_mode="Markdown")
+        await update.message.reply_text("🚨 Ошибка записи вопроса! Свяжитесь с @dimap7221.", parse_mode="Markdown")
         return
 
     if user_id not in question_hashes:
@@ -1108,8 +1109,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             await context.bot.send_message(
                                 chat_id=q["user_id"],
                                 text=f"❌ *Вопрос аннулирован!* 😿\n"
-                                 f"**Причина**: *{escaped_reason}*\n"
-                                 f"Подробности: `/guide`",
+                                     f"**Причина**: *{escaped_reason}*\n"
+                                     f"Подробности: `/guide`",
                                 parse_mode="MarkdownV2"
                             )
                             await query.message.reply_text(
@@ -1141,7 +1142,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif callback_data == "ask":
         await query.message.reply_text(
-            f"❓ Напиши `/ask <вопрос>`, например: `/ask Какая твоя любимая игра на стримах?`\n"
+            f"❓ Напиши `/ask <вопрос>`, например: `/ask Какая твоя любимая игра?`\n"
             f"Смотри `/guide` для подсказок!",
             parse_mode="Markdown"
         )
