@@ -34,7 +34,7 @@ ADMIN_ID = 335236137
 BLACKLIST_FILE = "blacklist.json"
 QA_WEBSITE = "https://mortisplay.ru/qa.html"
 MAX_PENDING_QUESTIONS = 3
-SIMILARITY_THRESHOLD = 0.6  # Снижено с 0.8 до 0.6
+SIMILARITY_THRESHOLD = 0.6
 
 # Перевод статусов
 STATUS_TRANSLATIONS = {
@@ -78,7 +78,6 @@ def check_blacklist(question: str) -> bool:
 
 def check_question_meaning(question: str) -> tuple[bool, str]:
     question_lower = question.lower().strip()
-    # Проверка на вопросы о боте
     bot_keywords = ["бот", "telegram", "телега", "телеграм", "bot"]
     if any(keyword in question_lower for keyword in bot_keywords):
         logger.info(f"Вопрос отклонён: содержит упоминание бота ({question})")
@@ -247,7 +246,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• `/edit <id> <вопрос>` — Редактировать вопрос (админ)\n"
         f"• `/cancel <id> <причина>` — Аннулировать вопрос (админ)\n"
         f"• `/approve <id> <ответ>` — Принять вопрос (админ)\n"
-        f"• `/reject <id> <причина>` — Отклонить вопрос (админ)\n\n"
+        f"• `/approve_all <id1,id2,...> <ответ>` — Принять несколько вопросов (админ)\n"
+        f"• `/reject <id> <причина>` — Отклонить вопрос (админ)\n"
+        f"• `/reject_all <id1,id2,...> <причина>` — Отклонить несколько вопросов (админ)\n\n"
         f"📢 Вопросы должны быть осмысленными и связанными с контентом Mortis Play. Запрещены вопросы о боте!\n"
         f"Новичок? Жми *Гайд* или пиши `/guide`! 🚀"
     )
@@ -636,6 +637,105 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         logger.error(f"Ошибка в /approve: неверный формат ID, команда: {update.message.text}")
 
+async def approve_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Команда /approve_all от user_id {update.effective_user.id}")
+    if not update.message or not update.message.text:
+        logger.info("Пропущено невалидное или удалённое сообщение")
+        return
+    if update.message.from_user.id != ADMIN_ID:
+        await update.message.reply_text("🚫 *Только админ* может это делать! 😎", parse_mode="Markdown")
+        logger.warning(f"Неавторизованная попытка /approve_all от user_id {update.message.from_user.id}")
+        return
+    update_id = update.update_id
+    if update_id in processed_updates:
+        logger.info(f"Дубликат update_id {update_id}, пропускаем")
+        return
+    processed_updates.add(update_id)
+
+    args = context.args
+    if len(args) < 2:
+        await update.message.reply_text(
+            f"❌ Укажи ID (через запятую) и ответ: `/approve_all <id1,id2,...> <ответ>`",
+            parse_mode="Markdown"
+        )
+        logger.error(f"Ошибка в /approve_all: отсутствует ID или ответ, команда: {update.message.text}")
+        return
+
+    try:
+        question_ids = [int(x) for x in args[0].split(",")]
+        answer = " ".join(args[1:])
+        try:
+            with open(QUESTIONS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            logger.error(f"Ошибка чтения {QUESTIONS_FILE}: {e}")
+            await update.message.reply_text("🚨 Ошибка чтения вопросов! Свяжитесь с @dimap7221.", parse_mode="Markdown")
+            return
+
+        processed_ids = []
+        failed_ids = []
+        for question_id in question_ids:
+            for q in data["questions"]:
+                if q["id"] == question_id and q["status"] == "pending" and not q.get("cancelled", False):
+                    q["status"] = "approved"
+                    q["answer"] = answer
+                    q["published"] = True
+                    processed_ids.append(question_id)
+                    if q["notify"]:
+                        try:
+                            escaped_answer = escape_markdown(answer, version=2)
+                            await context.bot.send_message(
+                                chat_id=q["user_id"],
+                                text=f"✅ *Вопрос принят!* 😎\n"
+                                     f"**Ответ**: *{escaped_answer}*\n"
+                                     f"Смотри на [сайте]({QA_WEBSITE})",
+                                parse_mode="MarkdownV2"
+                            )
+                            logger.info(f"Уведомление о принятии отправлено user_id {q['user_id']} для вопроса ID {question_id}")
+                        except Exception as e:
+                            logger.error(f"Ошибка уведомления пользователя {q['user_id']}: {e}")
+                            await context.bot.send_message(
+                                chat_id=q["user_id"],
+                                text=f"✅ Вопрос принят! 😎\n"
+                                     f"Ответ: {answer}\n"
+                                     f"Смотри на сайте: {QA_WEBSITE}",
+                                parse_mode=None
+                            )
+                    break
+            else:
+                failed_ids.append(question_id)
+
+        if not processed_ids:
+            await update.message.reply_text(
+                f"❌ Все указанные ID ({', '.join(map(str, question_ids))}) не найдены, обработаны или аннулированы!",
+                parse_mode="Markdown"
+            )
+            logger.warning(f"Вопросы ID {', '.join(map(str, question_ids))} не найдены, уже обработаны или аннулированы")
+            return
+
+        try:
+            with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except IOError as e:
+            logger.error(f"Ошибка записи в {QUESTIONS_FILE}: {e}")
+            await update.message.reply_text("🚨 Ошибка записи ответа! Свяжитесь с @dimap7221.", parse_mode="Markdown")
+            return
+
+        response = f"✅ Вопросы `{', '.join(map(str, processed_ids))}` *приняты*!\n**Ответ**: *{answer}*\nОпубликованы на [сайте]({QA_WEBSITE})"
+        if failed_ids:
+            response += f"\n❌ Не обработаны ID: `{', '.join(map(str, failed_ids))}` (не найдены, обработаны или аннулированы)"
+        notify_buttons = [[InlineKeyboardButton(f"Отправить уведомление 🔔 для ID {qid}", callback_data=f"send_notify_approved_{qid}")]
+                         for qid in processed_ids if any(q["id"] == qid and not q["notify"] for q in data["questions"])]
+        reply_markup = InlineKeyboardMarkup(notify_buttons) if notify_buttons else None
+        await update.message.reply_text(response, reply_markup=reply_markup, parse_mode="Markdown")
+        logger.info(f"Вопросы ID {', '.join(map(str, processed_ids))} приняты, ответ: {answer}")
+    except ValueError:
+        await update.message.reply_text(
+            f"❌ ID должны быть числами, разделёнными запятыми: `/approve_all <id1,id2,...> <ответ>`",
+            parse_mode="Markdown"
+        )
+        logger.error(f"Ошибка в /approve_all: неверный формат ID, команда: {update.message.text}")
+
 async def reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Команда /reject от user_id {update.effective_user.id}")
     if not update.message or not update.message.text:
@@ -729,6 +829,104 @@ async def reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
         logger.error(f"Ошибка в /reject: неверный формат ID, команда: {update.message.text}")
+
+async def reject_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Команда /reject_all от user_id {update.effective_user.id}")
+    if not update.message or not update.message.text:
+        logger.info("Пропущено невалидное или удалённое сообщение")
+        return
+    if update.message.from_user.id != ADMIN_ID:
+        await update.message.reply_text("🚫 *Только админ* может это делать! 😎", parse_mode="Markdown")
+        logger.warning(f"Неавторизованная попытка /reject_all от user_id {update.message.from_user.id}")
+        return
+    update_id = update.update_id
+    if update_id in processed_updates:
+        logger.info(f"Дубликат update_id {update_id}, пропускаем")
+        return
+    processed_updates.add(update_id)
+
+    args = context.args
+    if len(args) < 2:
+        await update.message.reply_text(
+            f"❌ Укажи ID (через запятую) и причину: `/reject_all <id1,id2,...> <причина>`",
+            parse_mode="Markdown"
+        )
+        logger.error(f"Ошибка в /reject_all: отсутствует ID или причина, команда: {update.message.text}")
+        return
+
+    try:
+        question_ids = [int(x) for x in args[0].split(",")]
+        reject_reason = " ".join(args[1:])
+        try:
+            with open(QUESTIONS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            logger.error(f"Ошибка чтения {QUESTIONS_FILE}: {e}")
+            await update.message.reply_text("🚨 Ошибка чтения вопросов! Свяжитесь с @dimap7221.", parse_mode="Markdown")
+            return
+
+        processed_ids = []
+        failed_ids = []
+        for question_id in question_ids:
+            for q in data["questions"]:
+                if q["id"] == question_id and q["status"] == "pending" and not q.get("cancelled", False):
+                    q["status"] = "rejected"
+                    q["reject_reason"] = reject_reason
+                    processed_ids.append(question_id)
+                    if q["notify"]:
+                        try:
+                            escaped_reason = escape_markdown(reject_reason, version=2)
+                            await context.bot.send_message(
+                                chat_id=q["user_id"],
+                                text=f"❌ *Вопрос отклонён!* 😕\n"
+                                     f"**Причина**: *{escaped_reason}*\n"
+                                     f"Попробуй другой. Подробности: `/guide`",
+                                parse_mode="MarkdownV2"
+                            )
+                            logger.info(f"Уведомление об отклонении отправлено user_id {q['user_id']} для вопроса ID {question_id}")
+                        except Exception as e:
+                            logger.error(f"Ошибка уведомления пользователя {q['user_id']}: {e}")
+                            await context.bot.send_message(
+                                chat_id=q["user_id"],
+                                text=f"❌ Вопрос отклонён! 😕\n"
+                                     f"Причина: {reject_reason}\n"
+                                     f"Попробуй другой. Подробности: /guide",
+                                parse_mode=None
+                            )
+                    break
+            else:
+                failed_ids.append(question_id)
+
+        if not processed_ids:
+            await update.message.reply_text(
+                f"❌ Все указанные ID ({', '.join(map(str, question_ids))}) не найдены, обработаны или аннулированы!",
+                parse_mode="Markdown"
+            )
+            logger.warning(f"Вопросы ID {', '.join(map(str, question_ids))} не найдены, уже обработаны или аннулированы")
+            return
+
+        try:
+            with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except IOError as e:
+            logger.error(f"Ошибка записи в {QUESTIONS_FILE}: {e}")
+            await update.message.reply_text("🚨 Ошибка записи статуса! Свяжитесь с @dimap7221.", parse_mode="Markdown")
+            return
+
+        response = f"❌ Вопросы `{', '.join(map(str, processed_ids))}` *отклонены*!\n**Причина**: *{reject_reason}*"
+        if failed_ids:
+            response += f"\n❌ Не обработаны ID: `{', '.join(map(str, failed_ids))}` (не найдены, обработаны или аннулированы)"
+        notify_buttons = [[InlineKeyboardButton(f"Отправить уведомление 🔔 для ID {qid}", callback_data=f"send_notify_rejected_{qid}")]
+                         for qid in processed_ids if any(q["id"] == qid and not q["notify"] for q in data["questions"])]
+        reply_markup = InlineKeyboardMarkup(notify_buttons) if notify_buttons else None
+        await update.message.reply_text(response, reply_markup=reply_markup, parse_mode="Markdown")
+        logger.info(f"Вопросы ID {', '.join(map(str, processed_ids))} отклонены, причина: {reject_reason}")
+    except ValueError:
+        await update.message.reply_text(
+            f"❌ ID должны быть числами, разделёнными запятыми: `/reject_all <id1,id2,...> <причина>`",
+            parse_mode="Markdown"
+        )
+        logger.error(f"Ошибка в /reject_all: неверный формат ID, команда: {update.message.text}")
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Команда /cancel от user_id {update.effective_user.id}")
@@ -1164,7 +1362,9 @@ async def main_async():
         app.add_handler(CommandHandler("myquestions", my_questions))
         app.add_handler(CommandHandler("ask", ask))
         app.add_handler(CommandHandler("approve", approve))
+        app.add_handler(CommandHandler("approve_all", approve_all))
         app.add_handler(CommandHandler("reject", reject))
+        app.add_handler(CommandHandler("reject_all", reject_all))
         app.add_handler(CommandHandler("cancel", cancel))
         app.add_handler(CommandHandler("delete", delete))
         app.add_handler(CommandHandler("clear", clear))
