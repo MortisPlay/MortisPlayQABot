@@ -396,6 +396,10 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
         return
+    if update.message.chat.type != "private":
+        await update.message.reply_text("🚫 Команда доступна только в личных сообщениях!", parse_mode="Markdown")
+        logger.info(f"Попытка использовать /ask в чате {update.message.chat.type} от user_id {update.effective_user.id}")
+        return
     update_id = update.update_id
     if update_id in processed_updates:
         logger.info(f"Дубликат update_id {update_id}, пропускаем")
