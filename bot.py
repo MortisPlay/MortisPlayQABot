@@ -79,10 +79,6 @@ def check_blacklist(question: str) -> bool:
 def check_question_meaning(question: str, username: str) -> tuple[bool, str]:
     question_lower = question.lower().strip()
     
-    # Проверка на вопросы от ботов
-    if username and username.lower().startswith("@groupanonymousbot"):
-        return False, "Вопросы от анонимных ботов запрещены."
-    
     # Проверка на упоминание ботов в вопросе
     bot_keywords = ["бот", "telegram", "телега", "телеграм", "bot", "@groupanonymousbot"]
     if any(keyword in question_lower for keyword in bot_keywords):
