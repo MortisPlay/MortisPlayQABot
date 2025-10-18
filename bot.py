@@ -10,8 +10,9 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from telegram.helpers import escape_markdown
 from dotenv import load_dotenv
+from telegram.error import RetryAfter, TimedOut
 
-# Настройка логирования
+# Настройка логирования с timestamp в файл
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -44,10 +45,27 @@ STATUS_TRANSLATIONS = {
     "cancelled": "Аннулирован"
 }
 
-# Инициализация JSON
+# Инициализация JSON с миграцией
 if not os.path.exists(QUESTIONS_FILE):
     with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
         json.dump({"questions": []}, f, ensure_ascii=False, indent=2)
+else:
+    # Миграция: Добавляем missing fields для старых записей
+    with open(QUESTIONS_FILE, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    for q in data.get("questions", []):
+        if "notify" not in q:
+            q["notify"] = False
+        if "cancelled" not in q:
+            q["cancelled"] = False
+        if "cancel_reason" not in q:
+            q["cancel_reason"] = ""
+        if "reject_reason" not in q:
+            q["reject_reason"] = ""
+        if "published" not in q:
+            q["published"] = q.get("status") == "approved"
+    with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 if not os.path.exists(BLACKLIST_FILE):
     with open(BLACKLIST_FILE, "w", encoding="utf-8") as f:
@@ -260,9 +278,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📋 *Команды*:\n"
         f"• `/start` — Начало работы\n"
         f"• `/guide` — Гайд для новичков\n"
+        f"• `/help` — Список команд\n"
         f"• `/ask <вопрос>` — Задать вопрос\n"
         f"• `/myquestions` — Твои вопросы\n"
-        f"• `/help` — Список команд\n"
         f"• `/list` — Все вопросы (админ)\n"
         f"• `/clear` — Очистить вопросы (админ)\n"
         f"• `/delete <id>` — Удалить вопрос (админ)\n"
@@ -279,7 +297,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
     except Exception as e:
         logger.error(f"Ошибка отправки /help: {e}")
-        text_plain = text.replace("*", "").replace("[сайте](https://mortisplay.ru/qa.html)", f"сайте {QA_WEBSITE}")
+        text_plain = text.replace("*", "").replace("_", "").replace("[сайте](https://mortisplay.ru/qa.html)", f"сайте {QA_WEBSITE}")
         await update.message.reply_text(text_plain, reply_markup=reply_markup, parse_mode=None)
 
 async def list_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -305,32 +323,34 @@ async def list_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🚨 Ошибка чтения вопросов! Свяжитесь с @dimap7221.", parse_mode="Markdown")
         return
 
-    active_questions = [q for q in data["questions"] if not q.get("cancelled", False)]
-    if not active_questions:
-        await update.message.reply_text("📭 *Нет активных вопросов*!", parse_mode="Markdown")
-        logger.info("Список активных вопросов пуст")
+    all_questions = data["questions"]  # Показываем ВСЕ вопросы, включая cancelled/rejected
+    if not all_questions:
+        await update.message.reply_text("📭 *Нет вопросов*!", parse_mode="Markdown")
+        logger.info("Список вопросов пуст")
         return
 
-    response = "*📋 Список активных вопросов*:\n\n"
-    for q in active_questions:
+    response = "*📋 Список всех вопросов*:\n\n"
+    for q in sorted(all_questions, key=lambda x: x["id"]):  # Сортировка по ID для удобства
         status = STATUS_TRANSLATIONS.get(q["status"], q["status"])
         escaped_question = escape_markdown(q["question"], version=2)
         escaped_username = escape_markdown(q["username"], version=2)
         cancel_reason = f"\n**Причина**: *{escape_markdown(q['cancel_reason'], version=2)}*" if q.get("cancel_reason") and q["status"] == "cancelled" else ""
         reject_reason = f"\n**Причина**: *{escape_markdown(q['reject_reason'], version=2)}*" if q.get("reject_reason") and q["status"] == "rejected" else ""
-        response += f"**ID**: `{q['id']}`\n**От**: @{escaped_username}\n**Вопрос**: *{escaped_question}*\n**Статус**: `{status}`{cancel_reason}{reject_reason}\n\n"
+        answer = f"\n**Ответ**: *{escape_markdown(q.get('answer', ''), version=2)}*" if q["status"] == "approved" and "answer" in q else ""
+        response += f"**ID**: `{q['id']}`\n**От**: @{escaped_username}\n**Вопрос**: *{escaped_question}*\n**Статус**: `{status}`{answer}{reject_reason}{cancel_reason}\n\n"
 
     try:
         await update.message.reply_text(response, parse_mode="MarkdownV2")
-        logger.info(f"Админ запросил список вопросов: {len(active_questions)} активных вопросов")
+        logger.info(f"Админ запросил список вопросов: {len(all_questions)} вопросов всего")
     except Exception as e:
         logger.error(f"Ошибка отправки списка вопросов: {e}")
-        plain_response = "📋 Список активных вопросов:\n\n"
-        for q in active_questions:
+        plain_response = "📋 Список всех вопросов:\n\n"
+        for q in sorted(all_questions, key=lambda x: x["id"]):
             status = STATUS_TRANSLATIONS.get(q["status"], q["status"])
             cancel_reason = f"\nПричина: {q['cancel_reason']}" if q.get("cancel_reason") and q["status"] == "cancelled" else ""
             reject_reason = f"\nПричина: {q['reject_reason']}" if q.get("reject_reason") and q["status"] == "rejected" else ""
-            plain_response += f"ID: {q['id']}\nОт: @{q['username']}\nВопрос: {q['question']}\nСтатус: {status}{cancel_reason}{reject_reason}\n\n"
+            answer = f"\nОтвет: {q.get('answer', '')}" if q["status"] == "approved" and "answer" in q else ""
+            plain_response += f"ID: {q['id']}\nОт: @{q['username']}\nВопрос: {q['question']}\nСтатус: {status}{answer}{reject_reason}{cancel_reason}\n\n"
         await update.message.reply_text(plain_response)
         logger.info(f"Отправлен список вопросов в plain-text формате из-за ошибки MarkdownV2")
 
@@ -355,7 +375,7 @@ async def my_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await reply_to.reply_text("🚨 Ошибка чтения вопросов! Свяжитесь с @dimap7221.", parse_mode="Markdown")
         return
 
-    user_questions = [q for q in data["questions"] if q["user_id"] == user_id and not q.get("cancelled", False)]
+    user_questions = [q for q in data["questions"] if q["user_id"] == user_id]  # Показываем все, включая cancelled
     remaining_attempts = get_remaining_attempts(user_id, data)
     if not user_questions:
         await reply_to.reply_text(
@@ -363,11 +383,11 @@ async def my_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Пиши `/ask` или `/guide`! 🚀",
             parse_mode="Markdown"
         )
-        logger.info(f"Пользователь user_id {user_id} запросил свои вопросы: список активных вопросов пуст")
+        logger.info(f"Пользователь user_id {user_id} запросил свои вопросы: список пуст")
         return
 
     response = f"*📋 Твои вопросы* (*Попыток*: {remaining_attempts}/3):\n\n"
-    for q in user_questions:
+    for q in sorted(user_questions, key=lambda x: x["id"]):  # Сортировка по ID
         status = STATUS_TRANSLATIONS.get(q["status"], q["status"])
         escaped_question = escape_markdown(q["question"], version=2)
         escaped_answer = escape_markdown(q["answer"], version=2) if q["status"] == "approved" and "answer" in q else ""
@@ -378,13 +398,13 @@ async def my_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         await reply_to.reply_text(response, parse_mode="MarkdownV2")
-        logger.info(f"Пользователь user_id {user_id} запросил свои вопросы: {len(user_questions)} активных вопросов")
+        logger.info(f"Пользователь user_id {user_id} запросил свои вопросы: {len(user_questions)} вопросов всего")
     except Exception as e:
         logger.error(f"Ошибка отправки списка вопросов: {e}")
         plain_response = f"📋 Твои вопросы (Попыток: {remaining_attempts}/3):\n\n"
-        for q in user_questions:
+        for q in sorted(user_questions, key=lambda x: x["id"]):
             status = STATUS_TRANSLATIONS.get(q["status"], q["status"])
-            answer = f"\nОтвет: {q['answer']}" if q["status"] == "approved" and "answer" in q else ""
+            answer = f"\nОтвет: {q.get('answer', '')}" if q["status"] == "approved" and "answer" in q else ""
             reject_reason = f"\nПричина: {q['reject_reason']}" if q.get("reject_reason") and q["status"] == "rejected" else ""
             cancel_reason = f"\nПричина: {q['cancel_reason']}" if q.get("cancel_reason") and q["status"] == "cancelled" else ""
             plain_response += f"ID: {q['id']}\nВопрос: {q['question']}\nСтатус: {status}{answer}{reject_reason}{cancel_reason}\n\n"
@@ -631,6 +651,16 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             parse_mode="MarkdownV2"
                         )
                         logger.info(f"Уведомление о принятии отправлено user_id {q['user_id']} для вопроса ID {question_id}")
+                    except (RetryAfter, TimedOut) as e:
+                        logger.warning(f"Rate limit: ждём {e.retry_after} сек для уведомления {q['user_id']}")
+                        await asyncio.sleep(e.retry_after)
+                        await context.bot.send_message(
+                            chat_id=q["user_id"],
+                            text=f"✅ Вопрос принят! 😎\n"
+                                 f"Ответ: {answer}\n"
+                                 f"Смотри на сайте: {QA_WEBSITE}",
+                            parse_mode=None
+                        )
                     except Exception as e:
                         logger.error(f"Ошибка уведомления пользователя {q['user_id']}: {e}")
                         await context.bot.send_message(
@@ -1405,8 +1435,9 @@ async def main_async():
         while True:
             await asyncio.sleep(3600)
     except Exception as e:
-        logger.error(f"Ошибка инициализации бота: {e}")
-        raise
+        logger.error(f"Критическая ошибка инициализации бота: {e}. Перезапуск через 10 сек...")
+        await asyncio.sleep(10)
+        await main_async()  # Рекурсивный рестарт на ошибке
 
 if __name__ == "__main__":
     import sys
