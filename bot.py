@@ -7,7 +7,7 @@ import hashlib
 import re
 import difflib
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from telegram.helpers import escape_markdown
 from dotenv import load_dotenv
 from telegram.error import RetryAfter, TimedOut
@@ -37,7 +37,13 @@ QA_WEBSITE = "https://mortisplay.ru/qa.html"
 MAX_PENDING_QUESTIONS = 3
 SIMILARITY_THRESHOLD = 0.6
 
-# Перевод статусов
+# Глобальный флаг отключения бота
+BOT_ENABLED = False  # Установи True, когда включишь обратно
+
+# Сообщение об отключении
+DISABLED_MESSAGE = "🚫 Бот временно отключён. Следите за обновлениями в канале @MortisPlayTG!"
+
+# Перевод статусов (оставляем, на случай включения)
 STATUS_TRANSLATIONS = {
     "pending": "Рассматривается",
     "approved": "Принят",
@@ -45,7 +51,7 @@ STATUS_TRANSLATIONS = {
     "cancelled": "Аннулирован"
 }
 
-# Инициализация JSON с миграцией
+# Инициализация JSON с миграцией (оставляем, но если бот отключён, не трогаем)
 if not os.path.exists(QUESTIONS_FILE):
     with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
         json.dump({"questions": []}, f, ensure_ascii=False, indent=2)
@@ -71,7 +77,7 @@ if not os.path.exists(BLACKLIST_FILE):
     with open(BLACKLIST_FILE, "w", encoding="utf-8") as f:
         json.dump({"blacklist": []}, f, ensure_ascii=False, indent=2)
 
-# Защита от спама
+# Защита от спама (оставляем, но не используем при отключении)
 spam_protection = {}
 processed_updates = set()
 question_hashes = {}
@@ -152,7 +158,15 @@ def get_remaining_attempts(user_id: int, data: dict) -> int:
     pending_questions = [q for q in data["questions"] if q["user_id"] == user_id and q["status"] == "pending" and not q.get("cancelled", False)]
     return max(0, MAX_PENDING_QUESTIONS - len(pending_questions))
 
+async def disabled_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Хэндлер для всех сообщений и команд, когда бот отключён
+    logger.info(f"Попытка использования отключённого бота от user_id {update.effective_user.id}")
+    await update.effective_message.reply_text(DISABLED_MESSAGE, parse_mode="Markdown")
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not BOT_ENABLED:
+        logger.info(f"Попытка использования отключённого бота от user_id {update.effective_user.id}")
+        await update.effective_message.reply_text(DISABLED_MESSAGE, parse_mode="Markdown")
+        return
     logger.info(f"Команда /start от user_id {update.effective_user.id}")
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
@@ -190,6 +204,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not BOT_ENABLED:
+        logger.info(f"Попытка использования отключённого бота от user_id {update.effective_user.id}")
+        await update.effective_message.reply_text(DISABLED_MESSAGE, parse_mode="Markdown")
+        return
     logger.info(f"Команда /guide от user_id {update.effective_user.id}")
     user_id = update.effective_user.id
     reply_to = update.message or update.callback_query.message
@@ -246,6 +264,10 @@ async def guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await reply_to.reply_text(text_plain, reply_markup=reply_markup, parse_mode=None)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not BOT_ENABLED:
+        logger.info(f"Попытка использования отключённого бота от user_id {update.effective_user.id}")
+        await update.effective_message.reply_text(DISABLED_MESSAGE, parse_mode="Markdown")
+        return
     logger.info(f"Команда /help от user_id {update.effective_user.id}")
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
@@ -301,6 +323,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text_plain, reply_markup=reply_markup, parse_mode=None)
 
 async def list_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not BOT_ENABLED:
+        logger.info(f"Попытка использования отключённого бота от user_id {update.effective_user.id}")
+        await update.effective_message.reply_text(DISABLED_MESSAGE, parse_mode="Markdown")
+        return
     logger.info(f"Команда /list от user_id {update.effective_user.id}")
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
@@ -355,6 +381,10 @@ async def list_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Отправлен список вопросов в plain-text формате из-за ошибки MarkdownV2")
 
 async def my_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not BOT_ENABLED:
+        logger.info(f"Попытка использования отключённого бота от user_id {update.effective_user.id}")
+        await update.effective_message.reply_text(DISABLED_MESSAGE, parse_mode="Markdown")
+        return
     logger.info(f"Команда /myquestions от user_id {update.effective_user.id}")
     user_id = update.effective_user.id
     reply_to = update.message or update.callback_query.message
@@ -412,6 +442,10 @@ async def my_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Отправлен список вопросов в plain-text формате из-за ошибки MarkdownV2")
 
 async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not BOT_ENABLED:
+        logger.info(f"Попытка использования отключённого бота от user_id {update.effective_user.id}")
+        await update.effective_message.reply_text(DISABLED_MESSAGE, parse_mode="Markdown")
+        return
     logger.info(f"Команда /ask от user_id {update.effective_user.id}")
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
@@ -590,6 +624,10 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not BOT_ENABLED:
+        logger.info(f"Попытка использования отключённого бота от user_id {update.effective_user.id}")
+        await update.effective_message.reply_text(DISABLED_MESSAGE, parse_mode="Markdown")
+        return
     logger.info(f"Команда /approve от user_id {update.effective_user.id}")
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
@@ -696,6 +734,10 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Ошибка в /approve: неверный формат ID, команда: {update.message.text}")
 
 async def approve_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not BOT_ENABLED:
+        logger.info(f"Попытка использования отключённого бота от user_id {update.effective_user.id}")
+        await update.effective_message.reply_text(DISABLED_MESSAGE, parse_mode="Markdown")
+        return
     logger.info(f"Команда /approve_all от user_id {update.effective_user.id}")
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
@@ -795,6 +837,10 @@ async def approve_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Ошибка в /approve_all: неверный формат ID, команда: {update.message.text}")
 
 async def reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not BOT_ENABLED:
+        logger.info(f"Попытка использования отключённого бота от user_id {update.effective_user.id}")
+        await update.effective_message.reply_text(DISABLED_MESSAGE, parse_mode="Markdown")
+        return
     logger.info(f"Команда /reject от user_id {update.effective_user.id}")
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
@@ -889,6 +935,10 @@ async def reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Ошибка в /reject: неверный формат ID, команда: {update.message.text}")
 
 async def reject_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not BOT_ENABLED:
+        logger.info(f"Попытка использования отключённого бота от user_id {update.effective_user.id}")
+        await update.effective_message.reply_text(DISABLED_MESSAGE, parse_mode="Markdown")
+        return
     logger.info(f"Команда /reject_all от user_id {update.effective_user.id}")
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
@@ -987,6 +1037,10 @@ async def reject_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Ошибка в /reject_all: неверный формат ID, команда: {update.message.text}")
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not BOT_ENABLED:
+        logger.info(f"Попытка использования отключённого бота от user_id {update.effective_user.id}")
+        await update.effective_message.reply_text(DISABLED_MESSAGE, parse_mode="Markdown")
+        return
     logger.info(f"Команда /cancel от user_id {update.effective_user.id}")
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
@@ -1082,6 +1136,10 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Ошибка в /cancel: неверный формат ID, команда: {update.message.text}")
 
 async def delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not BOT_ENABLED:
+        logger.info(f"Попытка использования отключённого бота от user_id {update.effective_user.id}")
+        await update.effective_message.reply_text(DISABLED_MESSAGE, parse_mode="Markdown")
+        return
     logger.info(f"Команда /delete от user_id {update.effective_user.id}")
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
@@ -1145,37 +1203,11 @@ async def delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         logger.error(f"Ошибка в /delete: неверный формат ID, команда: {update.message.text}")
 
-async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"Команда /clear от user_id {update.effective_user.id}")
-    if not update.message or not update.message.text:
-        logger.info("Пропущено невалидное или удалённое сообщение")
-        return
-    if update.message.from_user.id != ADMIN_ID:
-        await update.message.reply_text("🚫 *Только админ* может это делать! 😎", parse_mode="Markdown")
-        logger.warning(f"Неавторизованная попытка /clear от user_id {update.message.from_user.id}")
-        return
-    update_id = update.update_id
-    if update_id in processed_updates:
-        logger.info(f"Дубликат update_id {update_id}, пропускаем")
-        return
-    processed_updates.add(update_id)
-
-    try:
-        data = {"questions": []}
-        with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    except IOError as e:
-        logger.error(f"Ошибка записи в {QUESTIONS_FILE}: {e}")
-        await update.message.reply_text("🚨 Ошибка очистки вопросов! Свяжитесь с @dimap7221.", parse_mode="Markdown")
-        return
-
-    await update.message.reply_text(
-        f"🗑️ *Все вопросы очищены*!",
-        parse_mode="Markdown"
-    )
-    logger.info("Все вопросы очищены")
-
 async def edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not BOT_ENABLED:
+        logger.info(f"Попытка использования отключённого бота от user_id {update.effective_user.id}")
+        await update.effective_message.reply_text(DISABLED_MESSAGE, parse_mode="Markdown")
+        return
     logger.info(f"Команда /edit от user_id {update.effective_user.id}")
     if not update.message or not update.message.text:
         logger.info("Пропущено невалидное или удалённое сообщение")
@@ -1245,6 +1277,10 @@ async def edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Ошибка в /edit: неверный формат ID, команда: {update.message.text}")
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not BOT_ENABLED:
+        logger.info(f"Попытка использования отключённого бота от user_id {update.effective_user.id}")
+        await update.effective_message.reply_text(DISABLED_MESSAGE, parse_mode="Markdown")
+        return
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
@@ -1425,9 +1461,9 @@ async def main_async():
         app.add_handler(CommandHandler("reject_all", reject_all))
         app.add_handler(CommandHandler("cancel", cancel))
         app.add_handler(CommandHandler("delete", delete))
-        app.add_handler(CommandHandler("clear", clear))
         app.add_handler(CommandHandler("edit", edit))
         app.add_handler(CallbackQueryHandler(button_callback, pattern="^(notify_|send_notify_|ask|myquestions|guide)"))
+        # Добавляем хэндлер для всех сообщений (не команд)        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, disabled_handler))
         await app.initialize()
         await app.start()
         await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)

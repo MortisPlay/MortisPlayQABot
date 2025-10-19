@@ -7,7 +7,11 @@
       "question": "когда новое видео?",
       "status": "approved",
       "notify": true,
-      "answer": "скоро"
+      "answer": "скоро",
+      "cancelled": false,
+      "cancel_reason": "",
+      "reject_reason": "",
+      "published": true
     }
   ]
 }
