@@ -100,12 +100,8 @@ def check_blacklist(question: str) -> bool:
         logger.error(f"Ошибка чтения {BLACKLIST_FILE}: {e}")
         return False
 
-def check_question_meaning(question: str, username: str) -> tuple[bool, str]:
+def check_question_meaning(question: str) -> tuple[bool, str]:
     question_lower = question.lower().strip()
-    
-    # Проверка на вопросы от ботов
-    if username and username.lower().startswith("@groupanonymousbot"):
-        return False, "Вопросы от анонимных ботов запрещены."
     
     # Проверка на упоминание ботов в вопросе
     bot_keywords = ["бот", "telegram", "телега", "телеграм", "bot", "@groupanonymousbot"]
@@ -482,7 +478,7 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    is_valid, reason = check_question_meaning(question, username)
+    is_valid, reason = check_question_meaning(question)
     if not is_valid:
         try:
             with open(QUESTIONS_FILE, "r", encoding="utf-8") as f:
